@@ -5373,8 +5373,43 @@ async function mdlGeneratePerf(modelId, sleeveIdx) {
   const sName    = sleeve ? sleeve.name : 'Current';
   const bench    = m.benchmark || 'S&P 500'; // Always model-level — never sleeve-level
 
-  // Send all holdings up to 20 — each as TICKER(weight%) so the AI can differentiate models
-  const allHoldings = holdings.slice(0,20).map(h => `${h.ticker||h.name}(${h.weight}%)`).join(', ');
+  // For combo models, expand placeholder holdings into real underlying tickers
+  // scaled by the combo allocation (e.g. Strategic Core 75% × SPYM 9% = 6.75%)
+  function expandHoldings(holdingsList, comboComponents, targetSleeveIdx) {
+    const isComboPlaceholder = holdingsList.every(h => h.ticker === '—' || h.ticker === '' || h.type === 'Model Allocation');
+    if (!isComboPlaceholder || !comboComponents || !comboComponents.length) {
+      return holdingsList.slice(0, 20);
+    }
+    const expanded = [];
+    comboComponents.forEach(c => {
+      const cm = CAPITAL_PLANNING_MODELS.find(x => x.id === c.modelId) || _models.find(x => x.id === c.modelId);
+      if (!cm) return;
+      const comboWeight = c.weight / 100; // e.g. 0.75
+      // Fixed single-sleeve models always use sleeve 0; variable models use the selected sleeve
+      const isFixed = !cm.sleeves || cm.sleeves.length <= 1;
+      const resolvedIdx = isFixed ? 0 : Math.min(targetSleeveIdx, (cm.sleeves||[]).length - 1);
+      const cs = cm.sleeves ? cm.sleeves[resolvedIdx] : null;
+      const ch = cs ? (cs.holdings || []) : (cm.holdings || []);
+      // Recursively expand if this component is also a combo model
+      const subHoldings = expandHoldings(ch, cm.combo_components, resolvedIdx);
+      subHoldings.forEach(h => {
+        if (!h.ticker || h.ticker === '—') return;
+        const scaledWeight = ((parseFloat(h.weight) || 0) * comboWeight).toFixed(2);
+        expanded.push({ ...h, weight: parseFloat(scaledWeight) });
+      });
+    });
+    // Merge duplicate tickers by summing weights
+    const merged = {};
+    expanded.forEach(h => {
+      const key = h.ticker.toUpperCase();
+      if (merged[key]) merged[key].weight = parseFloat((merged[key].weight + h.weight).toFixed(2));
+      else merged[key] = { ...h };
+    });
+    return Object.values(merged).sort((a,b) => b.weight - a.weight).slice(0, 20);
+  }
+
+  const expandedHoldings = expandHoldings(holdings, m.combo_components, sleeveIdx);
+  const allHoldings = expandedHoldings.map(h => `${h.ticker}(${h.weight}%)`).join(', ');
 
   const prompt = `You are a financial performance analyst providing internal advisor estimates. Estimate the weighted-average YTD and 1-year total returns for this portfolio.
 
