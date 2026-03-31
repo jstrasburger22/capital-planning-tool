@@ -684,14 +684,9 @@ body{font-family:'Nunito Sans',sans-serif;background:var(--cream);color:var(--te
 </div>
 
 <script>
-  const _ANTHROPIC_API_KEY = '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';
-
   function getApiHeaders() {
     return {
       'Content-Type': 'application/json',
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true',
-      'x-api-key': _ANTHROPIC_API_KEY
     };
   }
 
@@ -1978,7 +1973,7 @@ async function analyzePortfolio() {
     // ── Step 3: Single API call — extract + score simultaneously ──
     document.getElementById('az-status-sub').textContent = 'Analyzing holdings…';
 
-    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+    const resp = await fetch('/api/proxy', {
       method: 'POST',
       headers: getApiHeaders(),
       body: JSON.stringify({
@@ -2212,7 +2207,7 @@ async function searchStock() {
     // Still fetch name/description but lock the score
     const prompt = buildStockPrompt(ticker, securityType, knownScore);
 
-    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+    const resp = await fetch('/api/proxy', {
       method: 'POST',
       headers: getApiHeaders(),
       body: JSON.stringify({
@@ -2703,7 +2698,7 @@ Rules:
 - If ticker is blank, classify by name/description`;
 
   try {
-    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+    const resp = await fetch('/api/proxy', {
       method: 'POST',
       headers: getApiHeaders(),
       body: JSON.stringify({
@@ -3141,7 +3136,7 @@ Format as plain paragraphs — NO bullet points, NO headers, NO markdown. Write 
       messages: [{ role: 'user', content: prompt }]
     };
 
-    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+    const resp = await fetch('/api/proxy', {
       method: 'POST',
       headers: getApiHeaders(),
       body: JSON.stringify(requestBody)
@@ -5070,7 +5065,7 @@ Return ONLY a JSON array (no markdown), one object per holding in order:
 [{"ticker":"X","risk_score":74,"exp_ratio":0.03,"yield":1.8,"name":"Full Name"},...]`;
 
   try {
-    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+    const resp = await fetch('/api/proxy', {
       method:'POST', headers: getApiHeaders(),
       body: JSON.stringify({
         model:'claude-sonnet-4-6', max_tokens:2000,
@@ -5127,7 +5122,7 @@ async function mdlProcessFile(file) {
       // Use AI to extract from PDF
       const reader = new FileReader();
       const b64 = await new Promise(res => { reader.onload = e => res(e.target.result.split(',')[1]); reader.readAsDataURL(file); });
-      const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      const resp = await fetch('/api/proxy', {
         method:'POST', headers: getApiHeaders(),
         body: JSON.stringify({ model:'claude-sonnet-4-6', max_tokens:3000,
           messages:[{role:'user',content:[
@@ -5382,7 +5377,7 @@ Return ONLY this JSON (no markdown, no explanation):
 {"ytd":12.3,"oneYear":18.5,"ytd_bench":8.1,"oneYear_bench":22.4,"method":"one sentence describing the calculation approach"}`;
 
   try {
-    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+    const resp = await fetch('/api/proxy', {
       method:'POST', headers: getApiHeaders(),
       body: JSON.stringify({
         model:'claude-sonnet-4-6', max_tokens:600,
@@ -5449,7 +5444,7 @@ Return ONLY JSON (no markdown):
 {"ytd": 12.3, "oneYear": 18.5, "ytd_bench": 10.1, "oneYear_bench": 22.4, "note": "brief explanation of methodology"}`;
 
   try {
-    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+    const resp = await fetch('/api/proxy', {
       method:'POST', headers: getApiHeaders(),
       body: JSON.stringify({
         model:'claude-sonnet-4-6', max_tokens:600,
@@ -5522,7 +5517,7 @@ Only include holdings where you can genuinely suggest a better alternative. Skip
   results.innerHTML = '<div style="padding:20px;text-align:center;color:var(--slate);font-size:.8rem">⏳ Analyzing holdings and searching for alternatives…</div>';
 
   try {
-    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+    const resp = await fetch('/api/proxy', {
       method:'POST', headers: getApiHeaders(),
       body: JSON.stringify({
         model:'claude-sonnet-4-6', max_tokens:3000,
@@ -5615,7 +5610,7 @@ Provide a concise but complete summary covering:
 Keep it concise and advisor-focused. Use specific numbers. Write in plain prose, no bullet points.`;
 
   try {
-    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+    const resp = await fetch('/api/proxy', {
       method:'POST', headers: getApiHeaders(),
       body: JSON.stringify({
         model:'claude-sonnet-4-6', max_tokens:600,
