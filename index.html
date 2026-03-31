@@ -944,7 +944,7 @@ body{font-family:'Nunito Sans',sans-serif;background:var(--cream);color:var(--te
       <div class="opts">
         <div class="opt" onclick="pick(this,'q5',2)"><div class="opt-dot"></div><div><div class="opt-lbl">4–6% — steady, modest growth above a savings account</div></div></div>
         <div class="opt" onclick="pick(this,'q5',3)"><div class="opt-dot"></div><div><div class="opt-lbl">7–9% — long-term market-like returns</div></div></div>
-        <div class="opt" onclick="pick(this,'q5',4)"><div class="opt-dot"></div><div><div class="opt-lbl">10–14% — above-market growth; I accept the added risk</div></div></div>
+        <div class="opt" onclick="pick(this,'q5',4)"><div class="opt-dot"></div><div><div class="opt-lbl">10–14% — above-average historical returns; I accept the added risk</div></div></div>
         <div class="opt" onclick="pick(this,'q5',5)"><div class="opt-dot"></div><div><div class="opt-lbl">15%+ — maximum growth; I'm comfortable with significant swings</div></div></div>
       </div>
       <div class="second-ans-wrap" id="second-ans-5"><div class="second-ans-label" id="second-ans-lbl-5">Second Response</div><div class="second-ans-opts" id="second-ans-opts-5"></div></div>
@@ -957,7 +957,7 @@ body{font-family:'Nunito Sans',sans-serif;background:var(--cream);color:var(--te
   <div class="q-step" id="q-6">
     <div class="qcard">
       <div class="q-num">Question 6 of 8</div>
-      <div class="q-text">Breaking news: experts are predicting a market crash. How do you react?</div>
+      <div class="q-text">Breaking news: analysts are predicting a market crash. How do you react?</div>
       <div class="opts">
         <div class="opt" onclick="pick(this,'q6',1)"><div class="opt-dot"></div><div><div class="opt-lbl">I move to safer investments right away</div></div></div>
         <div class="opt" onclick="pick(this,'q6',3)"><div class="opt-dot"></div><div><div class="opt-lbl">I check in with my advisor but don't make major changes</div></div></div>
@@ -1171,8 +1171,8 @@ const QUIZ_QA_MAP = {
   q2:{ text:'Which outcome would bother you more?', opts:{2:'Losing 15% in a market downturn',3:'Both bother me equally',4:'Missing a 20% gain because I was too conservative'} },
   q3:{ text:'Your long-term portfolio drops 25% in a single year. What\'s your first instinct?', opts:{5:'Buy more — this looks like an opportunity',4:'Stay put — this is exactly what we planned for',1:'Get out — protect what\'s left'} },
   q4:{ text:'Choose the portfolio you\'d feel most comfortable owning long-term:', opts:{1:'Best: +8% / Worst: −2% / Avg: +4%',3:'Best: +18% / Worst: −12% / Avg: +8%',5:'Best: +35% / Worst: −25% / Avg: +12%'} },
-  q5:{ text:'What annual return would feel like a win for your long-term portfolio?', opts:{2:'4–6% — steady, modest growth above savings',3:'7–9% — long-term market-like returns',4:'10–14% — above-market growth; I accept the added risk',5:'15%+ — maximum growth; comfortable with significant swings'} },
-  q6:{ text:'Breaking news: experts predict a market crash. How do you react?', opts:{1:'I move to safer investments right away',3:'I check with my advisor but don\'t make major changes',5:'I tune it out — predictions are rarely accurate'} },
+  q5:{ text:'What annual return would feel like a win for your long-term portfolio?', opts:{2:'4–6% — steady, modest growth above savings',3:'7–9% — long-term market-like returns',4:'10–14% — above-average historical returns; I accept the added risk',5:'15%+ — maximum growth; comfortable with significant swings'} },
+  q6:{ text:'Breaking news: analysts predict a market crash. How do you react?', opts:{1:'I move to safer investments right away',3:'I check with my advisor but don\'t make major changes',5:'I tune it out — predictions are rarely accurate'} },
   q7:{ text:'Have you been through a major market decline before (2008 or 2020)?', opts:{5:'Yes — stayed invested, it reinforced my confidence',4:'Yes — got nervous but held on, learned from it',2:'Yes — made me a lot more cautious going forward',3:'No — haven\'t been through a major downturn yet'} },
   q8:{ text:'What\'s the biggest annual loss you could absorb in Bucket Three without losing sleep?', opts:{5:'More than 30%',4:'15%–30% — significant drops are hard but I stay the course',3:'5%–15% — moderate losses, I\'d check in but not overreact',1:'As little as possible'} }
 };
@@ -1456,7 +1456,12 @@ function resetQuiz() {
 }
 
 // ══ SAVE / PRINT — open clean styled page in new tab ══
-function saveAsImage(viewId, btnId, filename) {
+function downloadHtml(filename) {
+  // Reuse the same export logic as saveAsImage but trigger download directly
+  saveAsImage('view-analyzer', 'az-html-btn', filename, true);
+}
+
+function saveAsImage(viewId, btnId, filename, forceDownload) {
   const btn = document.getElementById(btnId);
   if (btn) { btn.innerHTML = '⏳ Opening...'; btn.classList.add('saving'); }
 
@@ -1767,11 +1772,21 @@ ${exportBody}
   try {
     const blob = new Blob([doc], { type: 'text/html;charset=utf-8' });
     const url  = URL.createObjectURL(blob);
+    if (forceDownload) {
+      // Direct download as .html file
+      const a = document.createElement('a');
+      a.href = url; a.download = filename + '.html';
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      if (btn) { btn.innerHTML = '✓ Downloaded!'; btn.style.color = '#1d7a50'; }
+      setTimeout(() => { if (btn) { btn.innerHTML = '💾 Save as HTML'; btn.style.color = ''; } }, 3000);
+      return;
+    }
     const tab  = window.open(url, '_blank');
     if (tab) {
       setTimeout(() => URL.revokeObjectURL(url), 60000);
       if (btn) {
-        btn.innerHTML = '✓ Opened in new tab → Ctrl+P to save PDF';
+        btn.innerHTML = '✓ Opened — use Ctrl+P → Save as PDF';
         btn.style.background = '#1d7a50'; btn.style.color = '#fff'; btn.style.borderColor = '#1d7a50';
       }
     } else {
@@ -1780,14 +1795,14 @@ ${exportBody}
       a.href = url; a.download = filename + '.html';
       document.body.appendChild(a); a.click(); document.body.removeChild(a);
       setTimeout(() => URL.revokeObjectURL(url), 5000);
-      if (btn) { btn.innerHTML = '✓ Downloaded — open in browser to print'; btn.style.background = '#1d7a50'; btn.style.color = '#fff'; btn.style.borderColor = '#1d7a50'; }
+      if (btn) { btn.innerHTML = '✓ Downloaded — open in browser then Ctrl+P'; btn.style.background = '#1d7a50'; btn.style.color = '#fff'; btn.style.borderColor = '#1d7a50'; }
     }
   } catch(e) {
-    if (btn) { btn.innerHTML = '🖼 Save / Print'; }
+    if (btn) { btn.innerHTML = '📄 Save as PDF'; }
     alert('Please allow popups for this page and try again.');
   }
   setTimeout(() => {
-    if (btn) { btn.innerHTML = '🖼 Save / Print'; btn.style.background = btn.style.color = btn.style.borderColor = ''; btn.classList.remove('saving'); }
+    if (btn) { btn.innerHTML = '📄 Save as PDF'; btn.style.background = btn.style.color = btn.style.borderColor = ''; btn.classList.remove('saving'); }
   }, 5000);
 }
 
@@ -2343,6 +2358,22 @@ function renderPortfolio(data) {
           <div id="az-total-balance" style="font-size:1rem;font-weight:700;color:#fff;font-family:'Playfair Display',serif">—</div>
         </div>
       </div>
+    </div>
+
+    <!-- ── SAVE BUTTONS (top of results) ── -->
+    <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
+      <button onclick="saveAsImage('view-analyzer','az-img-btn-top','portfolio-analysis')" id="az-img-btn-top"
+        style="display:flex;align-items:center;gap:6px;padding:9px 18px;border-radius:8px;border:1.5px solid #cda561;background:transparent;color:#cda561;font-family:'Nunito Sans',sans-serif;font-size:.78rem;font-weight:700;cursor:pointer;transition:all .2s">
+        📄 Save as PDF
+      </button>
+      <button onclick="downloadHtml('portfolio-analysis')" id="az-html-btn"
+        style="display:flex;align-items:center;gap:6px;padding:9px 18px;border-radius:8px;border:1.5px solid #e8e4dc;background:transparent;color:#6b7e96;font-family:'Nunito Sans',sans-serif;font-size:.78rem;font-weight:700;cursor:pointer;transition:all .2s">
+        💾 Save as HTML
+      </button>
+      <button class="btn-print" id="az-copy-btn-top" onclick="copyAnalyzerSummary()"
+        style="display:flex;align-items:center;gap:6px">
+        📋 Copy Summary
+      </button>
     </div>
 
     <div class="spec-section">
@@ -4618,7 +4649,18 @@ function renderMdlCard(m) {
   const riskScore  = sleeve && sleeve.risk_score ? sleeve.risk_score : mdlCalcRisk(holdings);
   const er         = sleeve && sleeve.exp_ratio  ? sleeve.exp_ratio  : mdlCalcER(holdings);
   const yld        = sleeve && sleeve.div_yield  ? sleeve.div_yield  : mdlCalcYield(holdings);
-  const bench      = m.benchmark || '—';
+  // Compute blended benchmark based on sleeve equity/bond split
+  const benchEquityPct = holdings.filter(h => (parseFloat(h.risk_score)||50) >= 55)
+    .reduce((s,h) => s + (parseFloat(h.weight)||0), 0);
+  const benchBondPct = holdings.filter(h => (parseFloat(h.risk_score)||50) < 55 && (parseFloat(h.risk_score)||50) > 6)
+    .reduce((s,h) => s + (parseFloat(h.weight)||0), 0);
+  const totalBenchPct = benchEquityPct + benchBondPct || 100;
+  const eqFrac = benchEquityPct / totalBenchPct;
+  const bdFrac = benchBondPct / totalBenchPct;
+  // If sleeve is mostly equity (>80%), use S&P 500. Mixed: blended label. Mostly bond: Agg.
+  const bench = eqFrac >= 0.85 ? 'S&P 500'
+    : eqFrac <= 0.20 ? 'Bloomberg Agg'
+    : `${Math.round(eqFrac*100)}% S&P 500 / ${Math.round(bdFrac*100)}% Bloomberg Agg`;
   const rCol       = riskScore <= 25 ? '#2563a8' : riskScore <= 40 ? '#22a06b' : riskScore <= 60 ? '#6b7e96' : riskScore <= 75 ? '#d4820a' : '#c0392b';
   const rBg        = riskScore <= 25 ? '#e8f0fa' : riskScore <= 40 ? '#e6f4ed' : riskScore <= 60 ? '#f0f2f6' : riskScore <= 75 ? '#fff3e0' : '#fde8e8';
   const rLabel     = riskScore <= 25 ? 'Conservative' : riskScore <= 40 ? 'Mod. Conservative' : riskScore <= 60 ? 'Moderate' : riskScore <= 75 ? 'Mod. Aggressive' : 'Aggressive';
@@ -4678,14 +4720,22 @@ function renderMdlCard(m) {
   }
 
   // ── Holdings rows for detail panel ──
+  // Check if any holding has current_weight set (for drift detection)
+  const hasDrift = holdings.some(h => h.current_weight != null);
   const holdingRows = holdings.map(h => {
     const s   = parseFloat(h.risk_score)||0;
     const col = s<=25?'#2563a8':s<=40?'#22a06b':s<=60?'#6b7e96':s<=75?'#d4820a':'#c0392b';
     const bg  = s<=25?'#e8f0fa':s<=40?'#e6f4ed':s<=60?'#f0f2f6':s<=75?'#fff3e0':'#fde8e8';
     const w   = parseFloat(h.weight)||0;
-    return `<div style="display:grid;grid-template-columns:52px 1fr 42px 36px 46px;gap:6px;align-items:center;padding:7px 0;border-bottom:1px solid #f0eee8">
+    const cw  = parseFloat(h.current_weight);
+    const drift = !isNaN(cw) ? (cw - w) : null;
+    const driftCol = drift == null ? '' : Math.abs(drift) >= 3 ? '#c0392b' : Math.abs(drift) >= 1.5 ? '#d4820a' : '#1d7a50';
+    const driftTxt = drift == null ? '' : (drift >= 0 ? '+' : '') + drift.toFixed(1) + '%';
+    const driftBadge = drift == null ? '' : `<span style="font-size:.58rem;font-weight:700;color:${driftCol};background:${Math.abs(drift)>=3?'#fde8e8':Math.abs(drift)>=1.5?'#fff3e0':'#e6f4ed'};border-radius:4px;padding:1px 5px;white-space:nowrap">${driftTxt}</span>`;
+    return `<div style="display:grid;grid-template-columns:52px 1fr ${hasDrift?'50px ':''} 42px 36px 46px;gap:6px;align-items:center;padding:7px 0;border-bottom:1px solid #f0eee8">
       <div style="font-family:'JetBrains Mono',monospace;font-size:.68rem;font-weight:700;color:#1b2b3a;background:#f5f0ec;border-radius:5px;padding:2px 6px;text-align:center">${h.ticker||'—'}</div>
       <div style="font-size:.73rem;font-weight:600;color:#1a2a3a;line-height:1.3">${h.name||'—'}</div>
+      ${hasDrift ? `<div style="text-align:center">${driftBadge}</div>` : ''}
       <div style="font-size:.7rem;font-weight:700;color:#1a2a3a;text-align:right">${w>0?w.toFixed(1)+'%':'—'}</div>
       <div style="font-size:.68rem;font-weight:700;color:${col};text-align:center;background:${bg};border-radius:5px;padding:1px 4px">${s||'—'}</div>
       <div style="font-size:.65rem;color:#6b7e96;text-align:right">${h.exp_ratio?h.exp_ratio.toFixed(2)+'%':'—'}</div>
@@ -4859,6 +4909,20 @@ function renderMdlCard(m) {
                box-shadow:0 2px 8px rgba(27,43,58,.15)">
         <span style="font-size:.85rem">⚡</span> Generate Performance
       </button>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
+        <button onclick="event.stopPropagation();openCompareModal('${m.id}',${sleeveIdx})"
+          style="padding:8px;border-radius:8px;border:1.5px solid #e8e4dc;background:#fff;
+                 font-family:'Nunito Sans',sans-serif;font-size:.68rem;font-weight:700;
+                 color:#6b7e96;cursor:pointer;transition:all .2s;display:flex;align-items:center;justify-content:center;gap:5px">
+          ⚖️ Compare
+        </button>
+        <button onclick="event.stopPropagation();generateProposal('${m.id}',${sleeveIdx})"
+          style="padding:8px;border-radius:8px;border:1.5px solid #e8e4dc;background:#fff;
+                 font-family:'Nunito Sans',sans-serif;font-size:.68rem;font-weight:700;
+                 color:#6b7e96;cursor:pointer;transition:all .2s;display:flex;align-items:center;justify-content:center;gap:5px">
+          📄 Proposal
+        </button>
+      </div>
     </div>
 
     <!-- ── ADDITIONAL DETAILS (expandable) ── -->
@@ -5371,7 +5435,17 @@ async function mdlGeneratePerf(modelId, sleeveIdx) {
   const today    = new Date().toISOString().split('T')[0];
   const ytdStart = new Date().getFullYear() + '-01-01';
   const sName    = sleeve ? sleeve.name : 'Current';
-  const bench    = m.benchmark || 'S&P 500'; // Always model-level — never sleeve-level
+  // Compute blended benchmark based on sleeve equity/bond split
+  const _holdings4bench = sleeve ? (sleeve.holdings || []) : (m.holdings || []);
+  const _eqPct = _holdings4bench.filter(h => (parseFloat(h.risk_score)||50) >= 55)
+    .reduce((s,h) => s + (parseFloat(h.weight)||0), 0);
+  const _bdPct = _holdings4bench.filter(h => (parseFloat(h.risk_score)||50) < 55 && (parseFloat(h.risk_score)||50) > 6)
+    .reduce((s,h) => s + (parseFloat(h.weight)||0), 0);
+  const _tot = _eqPct + _bdPct || 100;
+  const _ef = _eqPct / _tot;
+  const bench = _ef >= 0.85 ? 'S&P 500'
+    : _ef <= 0.20 ? 'Bloomberg Aggregate Bond Index'
+    : `${Math.round(_ef*100)}% S&P 500 / ${Math.round((1-_ef)*100)}% Bloomberg Aggregate Bond Index`;
 
   // For combo models, expand placeholder holdings into real underlying tickers
   // scaled by the combo allocation (e.g. Strategic Core 75% × SPYM 9% = 6.75%)
@@ -5715,6 +5789,225 @@ Keep it concise and advisor-focused. Use specific numbers. Write in plain prose,
   } catch(e) {
     box.innerHTML = `<p style="color:var(--red)">Research error: ${e.message}</p>`;
   }
+}
+
+// ── Compare Modal ──
+function openCompareModal(modelId, sleeveIdx) {
+  const m = _models.find(x => x.id === modelId);
+  if (!m) return;
+  const sleeve = m.sleeves ? m.sleeves[Math.min(sleeveIdx, m.sleeves.length-1)] : null;
+  const holdings = sleeve ? (sleeve.holdings||[]) : (m.holdings||[]);
+  const sName = sleeve ? sleeve.name : 'Current';
+  const perf = (sleeve && sleeve.perf) || m.perf || {};
+
+  // Build list of all models for comparison selector
+  const allModels = [...CAPITAL_PLANNING_MODELS, ..._models.filter(x => !CAPITAL_PLANNING_MODELS.find(c=>c.id===x.id))];
+  const opts = allModels.map(cm => {
+    const sleeves = cm.sleeves || [];
+    if (sleeves.length > 1) {
+      return sleeves.map((s,i) => `<option value="${cm.id}|${i}">${cm.name} — ${s.name}</option>`).join('');
+    }
+    return `<option value="${cm.id}|0">${cm.name}</option>`;
+  }).join('');
+
+  const riskScore = sleeve && sleeve.risk_score ? sleeve.risk_score : mdlCalcRisk(holdings);
+  const er = sleeve && sleeve.exp_ratio ? sleeve.exp_ratio : mdlCalcER(holdings);
+  const yld = sleeve && sleeve.div_yield ? sleeve.div_yield : mdlCalcYield(holdings);
+
+  const modal = document.createElement('div');
+  modal.id = 'compare-modal-overlay';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
+  modal.innerHTML = `
+    <div style="background:#fff;border-radius:16px;width:100%;max-width:900px;max-height:90vh;overflow-y:auto;box-shadow:0 24px 80px rgba(0,0,0,.25)">
+      <div style="background:linear-gradient(135deg,#1b2b3a,#2d3f4f);padding:20px 24px;border-radius:16px 16px 0 0;display:flex;justify-content:space-between;align-items:center">
+        <div style="font-family:'Playfair Display',serif;font-size:1.1rem;font-weight:700;color:#fff">Model Comparison</div>
+        <button onclick="document.getElementById('compare-modal-overlay').remove()" style="background:transparent;border:none;color:rgba(255,255,255,.7);font-size:1.2rem;cursor:pointer">✕</button>
+      </div>
+      <div style="padding:20px 24px">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
+          <div style="background:#f9f7f4;border-radius:10px;padding:16px">
+            <div style="font-size:.56rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#a8b8cc;margin-bottom:6px">Model A (Current)</div>
+            <div style="font-family:'Playfair Display',serif;font-size:.95rem;font-weight:700;color:#1b2b3a">${m.name}</div>
+            <div style="font-size:.72rem;color:#6b7e96;margin-top:2px">${sName}</div>
+          </div>
+          <div style="background:#f9f7f4;border-radius:10px;padding:16px">
+            <div style="font-size:.56rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#a8b8cc;margin-bottom:6px">Model B (Select to compare)</div>
+            <select id="compare-b-select" onchange="updateCompareB()" style="width:100%;padding:8px;border:1.5px solid #e8e4dc;border-radius:7px;font-family:'Nunito Sans',sans-serif;font-size:.75rem;background:#fff">
+              <option value="">— Select a model —</option>
+              ${opts}
+            </select>
+          </div>
+        </div>
+        <div id="compare-table" style="overflow-x:auto">
+          <table style="width:100%;border-collapse:collapse;font-family:'Nunito Sans',sans-serif">
+            <thead>
+              <tr style="border-bottom:2px solid #e8e4dc">
+                <th style="text-align:left;padding:10px 12px;font-size:.6rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#a8b8cc">Metric</th>
+                <th style="text-align:center;padding:10px 12px;font-size:.6rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#1b2b3a">Model A</th>
+                <th style="text-align:center;padding:10px 12px;font-size:.6rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#6b7e96">Model B</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr style="border-bottom:1px solid #f0eee8"><td style="padding:10px 12px;font-size:.72rem;color:#6b7e96">Risk Score</td><td style="padding:10px 12px;text-align:center;font-size:.85rem;font-weight:700;color:#1b2b3a">${riskScore}</td><td id="cmp-risk" style="padding:10px 12px;text-align:center;color:#a8b8cc">—</td></tr>
+              <tr style="border-bottom:1px solid #f0eee8"><td style="padding:10px 12px;font-size:.72rem;color:#6b7e96">Exp. Ratio</td><td style="padding:10px 12px;text-align:center;font-size:.85rem;font-weight:700;color:#1b2b3a">${er?er.toFixed(2)+'%':'—'}</td><td id="cmp-er" style="padding:10px 12px;text-align:center;color:#a8b8cc">—</td></tr>
+              <tr style="border-bottom:1px solid #f0eee8"><td style="padding:10px 12px;font-size:.72rem;color:#6b7e96">Div. Yield</td><td style="padding:10px 12px;text-align:center;font-size:.85rem;font-weight:700;color:#1b2b3a">${yld?yld.toFixed(2)+'%':'—'}</td><td id="cmp-yld" style="padding:10px 12px;text-align:center;color:#a8b8cc">—</td></tr>
+              <tr style="border-bottom:1px solid #f0eee8"><td style="padding:10px 12px;font-size:.72rem;color:#6b7e96">Holdings</td><td style="padding:10px 12px;text-align:center;font-size:.85rem;font-weight:700;color:#1b2b3a">${holdings.length}</td><td id="cmp-hold" style="padding:10px 12px;text-align:center;color:#a8b8cc">—</td></tr>
+              <tr style="border-bottom:1px solid #f0eee8"><td style="padding:10px 12px;font-size:.72rem;color:#6b7e96">YTD Return</td><td style="padding:10px 12px;text-align:center;font-size:.85rem;font-weight:700;color:${perf.ytd!=null?(perf.ytd>=0?'#1d7a50':'#c0392b'):'#a8b8cc'}">${perf.ytd!=null?(perf.ytd>=0?'+':'')+perf.ytd.toFixed(2)+'%':'—'}</td><td id="cmp-ytd" style="padding:10px 12px;text-align:center;color:#a8b8cc">—</td></tr>
+              <tr><td style="padding:10px 12px;font-size:.72rem;color:#6b7e96">1-Year Return</td><td style="padding:10px 12px;text-align:center;font-size:.85rem;font-weight:700;color:${perf.oneYear!=null?(perf.oneYear>=0?'#1d7a50':'#c0392b'):'#a8b8cc'}">${perf.oneYear!=null?(perf.oneYear>=0?'+':'')+perf.oneYear.toFixed(2)+'%':'—'}</td><td id="cmp-oney" style="padding:10px 12px;text-align:center;color:#a8b8cc">—</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div id="compare-holdings-b" style="margin-top:16px;display:none">
+          <div style="font-size:.56rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#a8b8cc;margin-bottom:10px">Model B Holdings</div>
+          <div id="compare-holdings-b-list"></div>
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+  modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+}
+
+window._compareModelA = null;
+function updateCompareB() {
+  const sel = document.getElementById('compare-b-select');
+  if (!sel || !sel.value) return;
+  const [mid, sidxStr] = sel.value.split('|');
+  const sidx = parseInt(sidxStr) || 0;
+  const allModels = [...CAPITAL_PLANNING_MODELS, ..._models.filter(x => !CAPITAL_PLANNING_MODELS.find(c=>c.id===x.id))];
+  const cm = allModels.find(x => x.id === mid);
+  if (!cm) return;
+  const cs = cm.sleeves ? cm.sleeves[Math.min(sidx, cm.sleeves.length-1)] : null;
+  const ch = cs ? (cs.holdings||[]) : (cm.holdings||[]);
+  const cr = cs && cs.risk_score ? cs.risk_score : mdlCalcRisk(ch);
+  const cer = cs && cs.exp_ratio ? cs.exp_ratio : mdlCalcER(ch);
+  const cyl = cs && cs.div_yield ? cs.div_yield : mdlCalcYield(ch);
+  const cp = (cs && cs.perf) || cm.perf || {};
+  const fmt = (v,isRisk) => v != null ? (isRisk ? v : (v>=0?'+':'')+v.toFixed(2)+'%') : '—';
+  const col = v => v != null ? (v >= 0 ? '#1d7a50' : '#c0392b') : '#a8b8cc';
+  document.getElementById('cmp-risk').innerHTML = `<span style="font-size:.85rem;font-weight:700;color:#6b7e96">${cr||'—'}</span>`;
+  document.getElementById('cmp-er').innerHTML = `<span style="font-size:.85rem;font-weight:700;color:#6b7e96">${cer?cer.toFixed(2)+'%':'—'}</span>`;
+  document.getElementById('cmp-yld').innerHTML = `<span style="font-size:.85rem;font-weight:700;color:#6b7e96">${cyl?cyl.toFixed(2)+'%':'—'}</span>`;
+  document.getElementById('cmp-hold').innerHTML = `<span style="font-size:.85rem;font-weight:700;color:#6b7e96">${ch.length}</span>`;
+  document.getElementById('cmp-ytd').innerHTML = `<span style="font-size:.85rem;font-weight:700;color:${col(cp.ytd)}">${fmt(cp.ytd)}</span>`;
+  document.getElementById('cmp-oney').innerHTML = `<span style="font-size:.85rem;font-weight:700;color:${col(cp.oneYear)}">${fmt(cp.oneYear)}</span>`;
+  // Show model B holdings
+  const bHold = document.getElementById('compare-holdings-b');
+  const bList = document.getElementById('compare-holdings-b-list');
+  if (ch.length) {
+    bHold.style.display = 'block';
+    bList.innerHTML = ch.slice(0,15).map(h => `
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid #f0eee8;font-size:.72rem">
+        <span style="font-family:'JetBrains Mono',monospace;background:#f5f0ec;border-radius:4px;padding:2px 6px;font-size:.65rem">${h.ticker||'—'}</span>
+        <span style="flex:1;margin:0 8px;color:#1a2a3a;font-weight:600">${h.name||'—'}</span>
+        <span style="color:#6b7e96;font-weight:700">${h.weight||0}%</span>
+      </div>`).join('');
+  }
+}
+
+// ── Proposal Generator ──
+async function generateProposal(modelId, sleeveIdx) {
+  const m = _models.find(x => x.id === modelId);
+  if (!m) return;
+  const sleeve = m.sleeves ? m.sleeves[Math.min(sleeveIdx, m.sleeves.length-1)] : null;
+  const holdings = sleeve ? (sleeve.holdings||[]) : (m.holdings||[]);
+  const sName = sleeve ? sleeve.name : '';
+  const perf = (sleeve && sleeve.perf) || m.perf || {};
+  const riskScore = sleeve && sleeve.risk_score ? sleeve.risk_score : mdlCalcRisk(holdings);
+  const er = sleeve && sleeve.exp_ratio ? sleeve.exp_ratio : mdlCalcER(holdings);
+  const yld = sleeve && sleeve.div_yield ? sleeve.div_yield : mdlCalcYield(holdings);
+  const rLabel = riskScore <= 25 ? 'Conservative' : riskScore <= 40 ? 'Moderately Conservative' : riskScore <= 60 ? 'Moderate' : riskScore <= 75 ? 'Moderately Aggressive' : 'Aggressive';
+
+  const today = new Date().toLocaleDateString('en-US', {month:'long', day:'numeric', year:'numeric'});
+  const fullName = sName ? `${m.name} — ${sName}` : m.name;
+  const fmtP = v => v != null ? (v>=0?'+':'')+parseFloat(v).toFixed(2)+'%' : 'N/A';
+
+  const holdingRows = holdings.map(h => `
+    <tr>
+      <td style="padding:8px 12px;font-family:monospace;font-size:12px;border-bottom:1px solid #f0eee8">${h.ticker||'—'}</td>
+      <td style="padding:8px 12px;font-size:13px;border-bottom:1px solid #f0eee8">${h.name||'—'}</td>
+      <td style="padding:8px 12px;text-align:right;font-size:13px;font-weight:600;border-bottom:1px solid #f0eee8">${h.weight||0}%</td>
+      <td style="padding:8px 12px;text-align:right;font-size:13px;border-bottom:1px solid #f0eee8">${h.risk_score||'—'}</td>
+      <td style="padding:8px 12px;text-align:right;font-size:13px;border-bottom:1px solid #f0eee8">${h.exp_ratio?h.exp_ratio.toFixed(2)+'%':'—'}</td>
+    </tr>`).join('');
+
+  const html = `<!DOCTYPE html><html><head><title>${fullName} — Investment Proposal</title>
+  <style>
+    body{font-family:'Helvetica Neue',Arial,sans-serif;margin:0;padding:0;color:#1a2a3a;background:#fff}
+    .header{background:linear-gradient(135deg,#1b2b3a,#2d3f4f);color:#fff;padding:40px 48px;display:flex;justify-content:space-between;align-items:flex-end}
+    .header-title{font-size:28px;font-weight:700;letter-spacing:-.5px}
+    .header-sub{font-size:14px;opacity:.7;margin-top:4px}
+    .header-date{font-size:13px;opacity:.6;text-align:right}
+    .firm{font-size:18px;font-weight:700;color:#cda561}
+    .body{padding:40px 48px}
+    .section{margin-bottom:32px}
+    .section-title{font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:#a8b8cc;margin-bottom:14px;padding-bottom:8px;border-bottom:2px solid #f0eee8}
+    .metric-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
+    .metric{background:#f9f7f4;border-radius:10px;padding:16px;text-align:center}
+    .metric-label{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#a8b8cc;margin-bottom:6px}
+    .metric-value{font-size:22px;font-weight:700;color:#1b2b3a}
+    .metric-sub{font-size:11px;color:#a8b8cc;margin-top:3px}
+    table{width:100%;border-collapse:collapse}
+    th{background:#f9f7f4;padding:10px 12px;text-align:left;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#6b7e96}
+    th:not(:first-child){text-align:right}
+    .perf-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+    .perf-card{background:#f9f7f4;border-radius:10px;padding:20px;text-align:center;position:relative;overflow:hidden}
+    .perf-accent{position:absolute;top:0;left:0;right:0;height:4px}
+    .footer{background:#f9f7f4;padding:24px 48px;font-size:11px;color:#a8b8cc;line-height:1.6;border-top:1px solid #e8e4dc}
+    @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+  </style></head><body>
+  <div class="header">
+    <div>
+      <div class="firm">Capital Planning Wealth Management</div>
+      <div class="header-title">${fullName}</div>
+      <div class="header-sub">Investment Model Proposal</div>
+    </div>
+    <div class="header-date">Prepared: ${today}<br>Benchmark: ${m.benchmark||'S&P 500'}</div>
+  </div>
+  <div class="body">
+    <div class="section">
+      <div class="section-title">Model Overview</div>
+      <div class="metric-grid">
+        <div class="metric"><div class="metric-label">Risk Score</div><div class="metric-value">${riskScore}</div><div class="metric-sub">${rLabel}</div></div>
+        <div class="metric"><div class="metric-label">Exp. Ratio</div><div class="metric-value">${er?er.toFixed(2)+'%':'—'}</div><div class="metric-sub">Weighted avg</div></div>
+        <div class="metric"><div class="metric-label">Div. Yield</div><div class="metric-value">${yld?yld.toFixed(2)+'%':'—'}</div><div class="metric-sub">Estimated</div></div>
+        <div class="metric"><div class="metric-label">Holdings</div><div class="metric-value">${holdings.length}</div><div class="metric-sub">Positions</div></div>
+      </div>
+    </div>
+    ${perf.ytd != null ? `
+    <div class="section">
+      <div class="section-title">Performance</div>
+      <div class="perf-grid">
+        <div class="perf-card"><div class="perf-accent" style="background:${perf.ytd>=0?'#1d7a50':'#c0392b'}"></div>
+          <div class="metric-label">YTD Return</div>
+          <div style="font-size:28px;font-weight:700;color:${perf.ytd>=0?'#1d7a50':'#c0392b'};margin:8px 0">${fmtP(perf.ytd)}</div>
+          ${perf.ytd_bench!=null?`<div style="font-size:12px;color:#a8b8cc">Benchmark: ${fmtP(perf.ytd_bench)} &nbsp;|&nbsp; <span style="color:${(perf.ytd-perf.ytd_bench)>=0?'#1d7a50':'#c0392b'};font-weight:700">${(perf.ytd-perf.ytd_bench)>=0?'▲':'▼'} ${Math.abs(perf.ytd-perf.ytd_bench).toFixed(2)}% vs bench</span></div>`:''}
+        </div>
+        <div class="perf-card"><div class="perf-accent" style="background:${perf.oneYear>=0?'#2563a8':'#c0392b'}"></div>
+          <div class="metric-label">1-Year Return</div>
+          <div style="font-size:28px;font-weight:700;color:${perf.oneYear>=0?'#2563a8':'#c0392b'};margin:8px 0">${fmtP(perf.oneYear)}</div>
+          ${perf.oneYear_bench!=null?`<div style="font-size:12px;color:#a8b8cc">Benchmark: ${fmtP(perf.oneYear_bench)} &nbsp;|&nbsp; <span style="color:${(perf.oneYear-perf.oneYear_bench)>=0?'#1d7a50':'#c0392b'};font-weight:700">${(perf.oneYear-perf.oneYear_bench)>=0?'▲':'▼'} ${Math.abs(perf.oneYear-perf.oneYear_bench).toFixed(2)}% vs bench</span></div>`:''}
+        </div>
+      </div>
+    </div>` : ''}
+    <div class="section">
+      <div class="section-title">Holdings</div>
+      <table>
+        <thead><tr><th>Ticker</th><th style="text-align:left">Name</th><th>Weight</th><th>Risk</th><th>Exp. Ratio</th></tr></thead>
+        <tbody>${holdingRows}</tbody>
+      </table>
+    </div>
+  </div>
+  <div class="footer">
+    This proposal is prepared by Capital Planning Wealth Management for informational purposes only. Past performance is not indicative of future results. 
+    Performance figures are AI-estimated and should be verified with actual custodian data before client presentation. 
+    Investment models are subject to change. Risk scores are based on the Nitrogen (Riskalyze) methodology.
+  </div>
+  </body></html>`;
+
+  const w = window.open('', '_blank');
+  w.document.write(html);
+  w.document.close();
+  setTimeout(() => w.print(), 500);
 }
 
 // ── Export / Import ──
@@ -6379,7 +6672,13 @@ const CAPITAL_PLANNING_MODELS = [
   inception: '2025-10-16',
   perf: { ytd: null, oneYear: null },
   annualReturns: [],
-  events: [],
+  events: [
+    { id:'altsc-rb1', date:'2026-02-05', type:'rebalance', ticker:'ALL HOLDINGS', notes:'Full model rebalance — weights adjusted back to target allocations across all sleeves' },
+    { id:'altsc-rb2', date:'2026-02-05', type:'trim',      ticker:'IBIT',         notes:'Trimmed overweight IBIT position back to target after crypto rally' },
+    { id:'altsc-rb3', date:'2026-02-05', type:'trim',      ticker:'QQQM',         notes:'Trimmed overweight QQQM position back to target weight' },
+    { id:'altsc-rb4', date:'2026-02-05', type:'add',       ticker:'GLD',          notes:'Added to GLD to restore target allocation after drift' },
+    { id:'altsc-rb5', date:'2026-02-05', type:'trim',      ticker:'QLEIX',        notes:'Trimmed QLEIX back to target after equity market drift' },
+  ],
   sleeves: [
     { name: 'Aggressive Growth', risk_score: 69, exp_ratio: 0.60, div_yield: 1.46, holdings: [
       { ticker:'SPYM', name:'SPDR Portfolio S&P 500 ETF',    type:'ETF', weight:8.6,  risk_score:74, exp_ratio:0.02, div_yield:1.3 },
@@ -6452,7 +6751,12 @@ const CAPITAL_PLANNING_MODELS = [
   inception: '2025-10-16',
   perf: { ytd: null, oneYear: null },
   annualReturns: [],
-  events: [],
+  events: [
+    { id:'alts-rb1', date:'2026-02-05', type:'rebalance', ticker:'ALL HOLDINGS', notes:'Full model rebalance — weights adjusted back to target allocations across all sleeves' },
+    { id:'alts-rb2', date:'2026-02-05', type:'trim',     ticker:'QQQM',          notes:'Trimmed overweight QQQM position back to target weight' },
+    { id:'alts-rb3', date:'2026-02-05', type:'add',      ticker:'GLD',           notes:'Added to GLD to restore target allocation after drift' },
+    { id:'alts-rb4', date:'2026-02-05', type:'trim',     ticker:'QLEIX',         notes:'Trimmed QLEIX back to target after equity market drift' },
+  ],
   sleeves: [
     { name: 'Aggressive Growth', risk_score: 69, exp_ratio: 0.62, div_yield: 1.54, holdings: [
       { ticker:'SPYM', name:'SPDR Portfolio S&P 500 ETF',    type:'ETF', weight:9.0,  risk_score:74, exp_ratio:0.02, div_yield:1.3 },
@@ -6801,8 +7105,16 @@ function getActiveSleeve(m) {
 
 function selectSleeve(modelId, idx) {
   _activeSleeveIndex[modelId] = idx;
-  // Re-render the full grid so card stats update
   renderMdlGrid();
+  // Auto-generate performance if not already cached for this sleeve
+  const m = _models.find(x => x.id === modelId);
+  if (!m) return;
+  const sleeve = m.sleeves ? m.sleeves[Math.min(idx, m.sleeves.length - 1)] : null;
+  const hasCached = sleeve ? sleeve.perf && sleeve.perf.ytd != null : m.perf && m.perf.ytd != null;
+  if (!hasCached) {
+    // Small delay so card renders first
+    setTimeout(() => mdlGeneratePerf(modelId, idx), 300);
+  }
 }
 
 
