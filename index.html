@@ -1978,7 +1978,7 @@ async function analyzePortfolio() {
       headers: getApiHeaders(),
       body: JSON.stringify({
         model: 'claude-sonnet-4-6',
-        max_tokens: 4000,
+        max_tokens: 8000,
         messages: [{ role: 'user', content: [...fileContent, { type:'text', text: prompt }] }]
       })
     });
@@ -2003,17 +2003,34 @@ async function analyzePortfolio() {
     const text  = (data.content || []).filter(b => b.type === 'text').map(b => b.text||'').join('');
     const clean = text.replace(/```json|```/g,'').trim();
     let parsed;
+
+    function fixTruncatedJson(str) {
+      // Remove trailing incomplete key-value pairs
+      let s = str.replace(/,\s*"[^"]*"\s*:\s*[^,\}\]]*$/, '');
+      // Remove trailing comma
+      s = s.replace(/,\s*$/, '');
+      // Count open braces and brackets, close them
+      let braces = 0, brackets = 0;
+      for (const ch of s) {
+        if (ch === '{') braces++;
+        else if (ch === '}') braces--;
+        else if (ch === '[') brackets++;
+        else if (ch === ']') brackets--;
+      }
+      while (brackets > 0) { s += ']'; brackets--; }
+      while (braces > 0)   { s += '}'; braces--; }
+      return s;
+    }
+
     try {
       parsed = JSON.parse(clean);
     } catch(e) {
-      // Try to extract partial JSON — useful if response was truncated
-      const m = clean.match(/\{[\s\S]*\}/);
+      const m = clean.match(/\{[\s\S]*/);
       if (m) {
         try { parsed = JSON.parse(m[0]); }
         catch(e2) {
-          // Last resort: try to fix truncated JSON by closing open arrays/objects
-          const partial = m[0].replace(/,\s*$/, '') + ']}';
-          parsed = JSON.parse(partial);
+          try { parsed = JSON.parse(fixTruncatedJson(m[0])); }
+          catch(e3) { throw new Error('Could not parse portfolio data from response. Please try again.'); }
         }
       } else throw new Error('Could not parse portfolio data from response. Please try again.');
     }
