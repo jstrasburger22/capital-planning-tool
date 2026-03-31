@@ -1970,32 +1970,35 @@ async function analyzePortfolio() {
 
     const prompt = buildPortfolioPrompt(knownScoresJSON);
 
-    // ── Step 3: Single API call — extract + score simultaneously ──
+    // ── Step 3: API call with automatic retry on truncation ──
     document.getElementById('az-status-sub').textContent = 'Analyzing holdings…';
 
-    const resp = await fetch('/api/proxy', {
-      method: 'POST',
-      headers: getApiHeaders(),
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 8000,
-        messages: [{ role: 'user', content: [...fileContent, { type:'text', text: prompt }] }]
-      })
-    });
-
-    if (!resp.ok) {
-      const errBody = await resp.json().catch(() => ({}));
-      throw new Error(`API error ${resp.status}: ${errBody?.error?.message || resp.statusText}`);
+    async function callProxy(tokensLimit) {
+      const resp = await fetch('/api/proxy', {
+        method: 'POST',
+        headers: getApiHeaders(),
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-6',
+          max_tokens: tokensLimit,
+          messages: [{ role: 'user', content: [...fileContent, { type:'text', text: prompt }] }]
+        })
+      });
+      if (!resp.ok) {
+        const errBody = await resp.json().catch(() => ({}));
+        throw new Error(`API error ${resp.status}: ${errBody?.error?.message || resp.statusText}`);
+      }
+      return await resp.json();
     }
 
-    const data  = await resp.json();
-
-    // Check for API-level error in response body
+    let data = await callProxy(8000);
     if (data.error) throw new Error(data.error.message || 'API returned an error');
 
-    // Handle stop_reason — if truncated, we may still have partial usable JSON
+    // If truncated, retry with higher limit
     if (data.stop_reason === 'max_tokens') {
-      console.warn('Response was truncated — portfolio may be partially scored');
+      console.warn('Response truncated at 8000 tokens — retrying with 16000');
+      document.getElementById('az-status-sub').textContent = 'Large portfolio detected — retrying…';
+      data = await callProxy(16000);
+      if (data.error) throw new Error(data.error.message || 'API returned an error');
     }
 
     document.getElementById('az-status-sub').textContent = 'Processing results…';
@@ -2125,36 +2128,15 @@ GENERAL RULE — only classify as cash/money market (risk 5) if the holding is e
 - A T-bill or government money market fund
 Short-duration bond ETFs, ultra-short bond funds, and municipal bond funds are NEVER cash.
 
-CRITICAL — Return ONLY valid JSON, no markdown, no explanation:
-{
-  "portfolio_name": "string",
-  "accounts": [
-    {
-      "account_name": "string (exact account name from file, e.g. 'Craig - SWM IRA (8955)')",
-      "holdings": [
-        {
-          "ticker": "string (or empty string if no ticker)",
-          "name": "string",
-          "type": "string (e.g. 'Large Cap ETF', 'Structured Note', 'Bond Fund')",
-          "market_value": number,
-          "allocation_pct": number (percentage of THIS ACCOUNT total, not overall portfolio),
-          "risk_score": number,
-          "risk_level": "string"
-        }
-      ]
-    }
-  ]
-}
+CRITICAL — Return ONLY valid JSON, no markdown, no explanation. Be concise — short type labels, no extra text:
+{"portfolio_name":"string","accounts":[{"account_name":"string","holdings":[{"ticker":"string","name":"string","type":"string","market_value":number,"allocation_pct":number,"risk_score":number,"risk_level":"string"}]}]}
 
 Rules:
-- Group ALL holdings by account. Each account gets its own entry in the accounts array.
-- If the file has no account grouping, put everything in one account named "Portfolio"
-- market_value: extract the ACTUAL dollar value from the file (e.g. from 'Market Value' column). Must be a number, never 0 or null if the file shows a value
-- allocation_pct should be each holding's % of its own account total market value (0-100, not decimal)
-- Extract ALL holdings including structured notes (risk_score=30), corporate/muni bonds (risk_score=10), US Treasuries/T-bills/govt money market (risk_score=5), money market/cash (risk_score=5), annuities (risk_score=5)
-- risk_level: "Low Risk" | "Conservative" | "Moderate" | "Moderately High" | "High Risk"
-- For holdings with no ticker (CUSIPs, structured notes): leave ticker as empty string, use full description as name
-- Return ONLY the JSON object, nothing else`;
+- Group by account. One account = "Portfolio" if no grouping in file.
+- market_value: actual dollar value from file. Never 0 or null if file shows a value.
+- allocation_pct: % of THIS account total (0-100, not decimal)
+- risk_level: "Low Risk"|"Conservative"|"Moderate"|"Moderately High"|"High Risk"
+- No ticker = empty string. Return ONLY the JSON object.`;
 }
 
 // Classify ticker type before sending to AI — speeds up lookup significantly
