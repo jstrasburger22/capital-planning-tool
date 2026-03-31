@@ -5365,24 +5365,20 @@ async function mdlGeneratePerf(modelId, sleeveIdx) {
   const sName    = sleeve ? sleeve.name : 'Current';
   const bench    = m.benchmark || 'S&P 500'; // Always model-level — never sleeve-level
 
-  const prompt = `You are a financial performance analyst. Estimate YTD and 1-year returns for this investment model based on your knowledge of these ETFs and funds.
+  // Build a concise holdings list (trim to top 10 by weight to save tokens)
+  const topHoldings = holdings.slice(0,10).map(h => `${h.ticker||h.name}(${h.weight}%)`).join(', ');
+  // Only include last 5 trade events to save tokens
+  const recentEvents = (m.events||[]).sort((a,b)=>b.date.localeCompare(a.date)).slice(0,5)
+    .map(e=>`${e.date} ${e.type} ${e.ticker}`).join('; ');
 
-MODEL: ${m.name} — ${sName} sleeve
-BENCHMARK: ${bench}
-HOLDINGS: ${holdingsList || '(see combo context)'}${comboContext}
+  const prompt = `Financial analyst: estimate YTD and 1-year total returns for this model.
+Holdings: ${topHoldings}
+Benchmark: ${bench}
+Recent trades: ${recentEvents || 'none'}
+YTD period: ${ytdStart} to ${today}
+1-year period: ${new Date(new Date().setFullYear(new Date().getFullYear()-1)).toISOString().split('T')[0]} to ${today}
 
-TRADE LOG (holding changes, most recent first):
-${eventsText || '(No trades — holdings unchanged since inception)'}
-
-TODAY: ${today}
-YTD: ${ytdStart} to ${today}
-1-YEAR: ${new Date(new Date().setFullYear(new Date().getFullYear()-1)).toISOString().split('T')[0]} to ${today}
-
-Use your knowledge of each ETF/fund's actual price performance for these periods. Calculate a weighted average return across the holdings using their weight percentages. If the trade log shows holdings changed mid-period, calculate a time-weighted blended return for each sub-period.
-
-Also estimate the benchmark (${bench}) return for the same periods.
-
-Return ONLY this exact JSON with no other text:
+Use your knowledge of these ETFs/funds. Weighted average across holdings. Return ONLY JSON:
 {"ytd":12.3,"oneYear":18.5,"ytd_bench":8.1,"oneYear_bench":22.4,"method":"brief note"}`;
 
   try {
