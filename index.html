@@ -5431,16 +5431,23 @@ Return ONLY this JSON, no other text, no explanation:
 {"ytd":12.3,"oneYear":18.5,"ytd_bench":8.1,"oneYear_bench":22.4,"method":"brief note"}`;
 
   try {
-    // Retry up to 3 times on overload (529) or server errors (500)
-    async function fetchWithRetry(body, attempts = 3) {
+    // Retry up to 5 times on overload with exponential backoff
+    async function fetchWithRetry(body, attempts = 5) {
       for (let i = 0; i < attempts; i++) {
         if (i > 0) {
-          if (btn) btn.innerHTML = '<span style="font-size:.85rem">⏳</span> Retrying…';
-          await new Promise(r => setTimeout(r, 2000 * i));
+          const delay = [3000, 6000, 10000, 15000][i - 1] || 15000;
+          if (btn) btn.innerHTML = `<span style="font-size:.85rem">⏳</span> Busy — retrying (${i}/${attempts-1})…`;
+          await new Promise(r => setTimeout(r, delay));
         }
-        const r = await fetch('/api/proxy', { method:'POST', headers:getApiHeaders(), body:JSON.stringify(body) });
+        let r;
+        try {
+          r = await fetch('/api/proxy', { method:'POST', headers:getApiHeaders(), body:JSON.stringify(body) });
+        } catch(e) {
+          if (i === attempts - 1) throw new Error('Network error — check connection');
+          continue;
+        }
         if (r.status === 529 || r.status === 500 || r.status === 503) {
-          if (i === attempts - 1) throw new Error('Overloaded — please try again in a moment');
+          if (i === attempts - 1) throw new Error('Server busy — please try again in a minute');
           continue;
         }
         if (!r.ok) {
@@ -5485,8 +5492,10 @@ Return ONLY this JSON, no other text, no explanation:
 
   } catch(e) {
     console.error('Generate perf error:', e);
-    alert('Performance generation failed: ' + e.message);
+    console.error('Performance generation failed:', e.message);
     if (btn) { btn.innerHTML = '<span style="font-size:.85rem">⚡</span> Generate Performance'; btn.disabled = false; btn.style.opacity = '1'; }
+    if (ytdEl) ytdEl.style.color = '#c0392b';
+    if (oneyEl) oneyEl.style.color = '#c0392b';
     if (ytdEl)  ytdEl.innerHTML = '—';
     if (oneyEl) oneyEl.innerHTML = '—';
   }
