@@ -2212,16 +2212,20 @@ async function searchStock() {
       body: JSON.stringify({
         model: 'claude-sonnet-4-6',
         max_tokens: 600,
-        // Always use web search so we get current name, AUM, description
-        tools: [{ type: 'web_search_20250305', name: 'web_search' }],
         messages: [{ role: 'user', content: prompt }]
       })
     });
 
+    if (!resp.ok) {
+      const errBody = await resp.json().catch(() => ({}));
+      throw new Error('API ' + resp.status + ': ' + (errBody?.error?.message || resp.statusText));
+    }
+
     const data = await resp.json();
-    const txt  = (data.content || []).map(b => b.text || '').join('').replace(/```json|```/g, '').trim();
+    if (data.error) throw new Error(data.error.message || 'API error');
+    const txt  = (data.content || []).filter(b => b.type === 'text').map(b => b.text || '').join('').replace(/```json|```/g, '').trim();
     const match = txt.match(/\{[\s\S]*\}/);
-    if (!match) throw new Error('No JSON returned');
+    if (!match) throw new Error('No JSON returned. Response: ' + txt.slice(0,100));
 
     let parsed = JSON.parse(match[0]);
 
@@ -2703,7 +2707,6 @@ Rules:
       body: JSON.stringify({
         model: 'claude-sonnet-4-6',
         max_tokens: 2000,
-        tools: [{ type: 'web_search_20250305', name: 'web_search' }],
         messages: [{ role: 'user', content: prompt }]
       })
     });
@@ -5084,7 +5087,6 @@ Return ONLY a JSON array (no markdown), one object per holding in order:
       method:'POST', headers: getApiHeaders(),
       body: JSON.stringify({
         model:'claude-sonnet-4-6', max_tokens:2000,
-        tools:[{type:'web_search_20250305',name:'web_search'}],
         messages:[{role:'user',content:prompt}]
       })
     });
@@ -5365,21 +5367,21 @@ async function mdlGeneratePerf(modelId, sleeveIdx) {
   const sName    = sleeve ? sleeve.name : 'Current';
   const bench    = m.benchmark || 'S&P 500'; // Always model-level — never sleeve-level
 
-  // Build a concise holdings list (trim to top 10 by weight to save tokens)
-  const topHoldings = holdings.slice(0,10).map(h => `${h.ticker||h.name}(${h.weight}%)`).join(', ');
-  // Only include last 5 trade events to save tokens
-  const recentEvents = (m.events||[]).sort((a,b)=>b.date.localeCompare(a.date)).slice(0,5)
-    .map(e=>`${e.date} ${e.type} ${e.ticker}`).join('; ');
+  // Send all holdings up to 20 — each as TICKER(weight%) so the AI can differentiate models
+  const allHoldings = holdings.slice(0,20).map(h => `${h.ticker||h.name}(${h.weight}%)`).join(', ');
 
-  const prompt = `Financial analyst: estimate YTD and 1-year total returns for this model.
-Holdings: ${topHoldings}
+  const prompt = `You are a financial performance analyst. Estimate the weighted-average YTD and 1-year total returns for this exact portfolio of ETFs and funds.
+
+Model: ${m.name} — ${sName} sleeve
 Benchmark: ${bench}
-Recent trades: ${recentEvents || 'none'}
+Holdings (ticker, weight): ${allHoldings}
 YTD period: ${ytdStart} to ${today}
 1-year period: ${new Date(new Date().setFullYear(new Date().getFullYear()-1)).toISOString().split('T')[0]} to ${today}
 
-Use your knowledge of these ETFs/funds. Weighted average across holdings. Return ONLY JSON:
-{"ytd":12.3,"oneYear":18.5,"ytd_bench":8.1,"oneYear_bench":22.4,"method":"brief note"}`;
+Calculate the weighted-average return across ALL holdings listed above using their weights. Each holding has a distinct return — do not group or approximate. For example GLD, QLEIX, IBIT etc. will have very different returns from equity ETFs and must be calculated separately.
+
+Return ONLY this JSON, no other text:
+{"ytd":12.3,"oneYear":18.5,"ytd_bench":8.1,"oneYear_bench":22.4,"method":"brief note on approach"}`;
 
   try {
     const resp = await fetch('/api/proxy', {
@@ -5387,7 +5389,7 @@ Use your knowledge of these ETFs/funds. Weighted average across holdings. Return
       headers: getApiHeaders(),
       body: JSON.stringify({
         model: 'claude-sonnet-4-6',
-        max_tokens: 1000,
+        max_tokens: 500,
         messages: [{ role: 'user', content: prompt }]
       })
     });
@@ -5403,7 +5405,7 @@ Use your knowledge of these ETFs/funds. Weighted average across holdings. Return
     const txt = (data.content || []).filter(b => b.type === 'text').map(b => b.text || '').join('').replace(/```json|```/g, '').trim();
     console.log('Generate perf raw response:', txt);
 
-    const match = txt.match(/\{[^{}]*\}/);
+    const match = txt.match(/\{[\s\S]*?\}/);
     if (!match) throw new Error('No JSON found in response. Raw: ' + txt.slice(0, 200));
     const perf = JSON.parse(match[0]);
 
@@ -5461,7 +5463,6 @@ Return ONLY JSON (no markdown):
       method:'POST', headers: getApiHeaders(),
       body: JSON.stringify({
         model:'claude-sonnet-4-6', max_tokens:600,
-        tools:[{type:'web_search_20250305',name:'web_search'}],
         messages:[{role:'user',content:prompt}]
       })
     });
@@ -5534,7 +5535,6 @@ Only include holdings where you can genuinely suggest a better alternative. Skip
       method:'POST', headers: getApiHeaders(),
       body: JSON.stringify({
         model:'claude-sonnet-4-6', max_tokens:3000,
-        tools:[{type:'web_search_20250305',name:'web_search'}],
         messages:[{role:'user',content:prompt}]
       })
     });
@@ -5627,7 +5627,6 @@ Keep it concise and advisor-focused. Use specific numbers. Write in plain prose,
       method:'POST', headers: getApiHeaders(),
       body: JSON.stringify({
         model:'claude-sonnet-4-6', max_tokens:600,
-        tools:[{type:'web_search_20250305',name:'web_search'}],
         messages:[{role:'user',content:prompt}]
       })
     });
