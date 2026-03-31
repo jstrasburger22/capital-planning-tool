@@ -5393,17 +5393,49 @@ Return ONLY this JSON (no markdown, no explanation):
 {"ytd":12.3,"oneYear":18.5,"ytd_bench":8.1,"oneYear_bench":22.4,"method":"brief description of tickers used and data sources"}`;
 
   try {
-    const resp = await fetch('/api/proxy', {
-      method:'POST', headers: getApiHeaders(),
-      body: JSON.stringify({
-        model:'claude-sonnet-4-6', max_tokens:4000,
-        tools:[{type:'web_search_20250305',name:'web_search'}],
-        messages:[{role:'user',content:prompt}]
-      })
-    });
-    const data = await resp.json();
-    const txt  = (data.content||[]).filter(b=>b.type==='text').map(b=>b.text||'').join('').replace(/```json|```/g,'').trim();
-    const match = txt.match(/\{[\s\S]*\}/);
+    // Tool-use requires a multi-turn loop: send prompt → handle tool calls → get final answer
+    async function runWithTools(messages) {
+      const resp = await fetch('/api/proxy', {
+        method:'POST', headers: getApiHeaders(),
+        body: JSON.stringify({
+          model:'claude-sonnet-4-6', max_tokens:4000,
+          tools:[{type:'web_search_20250305',name:'web_search'}],
+          messages
+        })
+      });
+      return await resp.json();
+    }
+
+    let messages = [{role:'user', content: prompt}];
+    let data = await runWithTools(messages);
+    if (data.error) throw new Error(data.error.message || 'API error');
+
+    // Loop through tool_use turns (web searches) until we get a final text response
+    let safetyLimit = 8;
+    while (data.stop_reason === 'tool_use' && safetyLimit-- > 0) {
+      if (btn) btn.innerHTML = '<span style="font-size:.85rem">🔍</span> Searching…';
+
+      // Build the assistant message with all content blocks
+      messages.push({ role: 'assistant', content: data.content });
+
+      // Build tool results for every tool_use block
+      const toolResults = (data.content || [])
+        .filter(b => b.type === 'tool_use')
+        .map(b => ({
+          type: 'tool_result',
+          tool_use_id: b.id,
+          content: b.type === 'web_search' ? (b.content || '') : JSON.stringify(b.input || {})
+        }));
+
+      if (toolResults.length === 0) break;
+      messages.push({ role: 'user', content: toolResults });
+      data = await runWithTools(messages);
+      if (data.error) throw new Error(data.error.message || 'API error');
+    }
+
+    // Extract the final JSON from the text response
+    const txt = (data.content||[]).filter(b=>b.type==='text').map(b=>b.text||'').join('').replace(/```json|```/g,'').trim();
+    const match = txt.match(/\{[\s\S]*?\}/);
     if (!match) throw new Error('No JSON in response');
     const perf = JSON.parse(match[0]);
 
