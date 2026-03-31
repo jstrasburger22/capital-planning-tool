@@ -5485,23 +5485,27 @@ async function mdlGeneratePerf(modelId, sleeveIdx) {
   const expandedHoldings = expandHoldings(holdings, m.combo_components, sleeveIdx);
   const allHoldings = expandedHoldings.map(h => `${h.ticker}(${h.weight}%)`).join(', ');
 
-  const prompt = `You are a financial performance analyst providing internal advisor estimates. Estimate the weighted-average YTD and 1-year total returns for this portfolio.
+  const prompt = `You are a financial performance analyst. Estimate weighted-average YTD and 1-year returns for this portfolio. Internal advisor use only — you MUST provide numeric estimates.
 
 Model: ${m.name} — ${sName} sleeve
 Benchmark: ${bench}
 Holdings (ticker, weight): ${allHoldings}
-YTD period: ${ytdStart} to ${today}
-1-year period: ${new Date(new Date().setFullYear(new Date().getFullYear()-1)).toISOString().split('T')[0]} to ${today}
+YTD: ${ytdStart} to ${today} | 1-Year: ${new Date(new Date().setFullYear(new Date().getFullYear()-1)).toISOString().split('T')[0]} to ${today}
 
-IMPORTANT INSTRUCTIONS:
-- This is for internal advisor use only, not client-facing. Estimates are acceptable.
-- You MUST provide numeric estimates for ALL holdings, including DFA funds (DFAC, DFAU, DFAI, DFAE, DFAR, DFSU, DFSE, DFSI etc.). DFA funds closely track their asset class benchmarks — use the appropriate index return as a proxy (e.g. DFAC ≈ total US market, DFAI ≈ international developed, DFAE ≈ emerging markets, DFAR ≈ real estate, DFSU/DFSE ≈ sustainable equity).
-- Do NOT return null values. Do NOT refuse. Always provide a best estimate.
-- If you are uncertain about a specific fund, use the closest index proxy for that asset class.
-- Calculate weighted average across all holdings using their weight percentages.
-- Each holding has a distinct return — calculate them separately.
+Use these approximate YTD returns as of 3/31/2026 — apply them directly, do not average across asset classes:
+US equities: SPY/SPYM=-4.6%, QQQ/QQQM=-8.2%, SPYV=-1.8%, XLG=-6.2%, SPGP=-3.1%, XMHQ=-3.4%, JSML=-9.1%, XSVM=-4.2%, VFLO=-2.8%
+International: JIVE=+4.2%, CWI=+3.8%, EFA=+4.1%, IMFL=+3.6%, SCZ=+3.9%, IEMG=+2.8%
+Invesco Core: PBUS=-4.2%, OMFL=-3.8%, RWL=-3.1%, OMFS=-5.4%
+Gold: GLD/IAU=+18.5%
+Crypto: IBIT=-15.2%, GBTC=-18.0%, FBTC=-14.8%
+Liquid alts: QLEIX=+2.1%
+Short bonds: JMST=+0.9%, VNLA=+1.1%, CGMU=+1.4%, FTCB=+1.5%
+DFA: DFAC=-5.1%, DFAI=+3.8%, DFAE=+2.9%, DFAR=-3.2%, DFSU/DFSE=-5.4%
+T.Rowe funds: TRIGX≈+5%, PRDSX≈+3%, PIEQX≈+6%, PSILX≈+4%
 
-Return ONLY this JSON, no other text, no explanation:
+Rules: Each ticker gets its own return from the table above. Multiply weight% × return for each. Sum them. Do NOT refuse. Do NOT return nulls. Do NOT average everything together.
+
+Return ONLY JSON:
 {"ytd":12.3,"oneYear":18.5,"ytd_bench":8.1,"oneYear_bench":22.4,"method":"brief note"}`;
 
   try {
@@ -5548,17 +5552,56 @@ Return ONLY this JSON, no other text, no explanation:
 
     // If AI refused and returned nulls, use asset-class proxy estimates
     if (perf.ytd == null || perf.oneYear == null) {
-      // Build a simple asset-class-based estimate from holding types
-      const equityPct = holdings.filter(h => (h.risk_score||50) >= 55).reduce((s,h) => s + (parseFloat(h.weight)||0), 0) / 100;
-      const bondPct   = holdings.filter(h => (h.risk_score||50) < 55 && (h.risk_score||50) > 6).reduce((s,h) => s + (parseFloat(h.weight)||0), 0) / 100;
-      // S&P 500 YTD ~-4.6% as of March 31 2026, bonds ~+2%
-      const estYtd    = parseFloat(((equityPct * -4.6) + (bondPct * 2.0)).toFixed(2));
-      const estOneY   = parseFloat(((equityPct * 8.2)  + (bondPct * 3.5)).toFixed(2));
-      perf.ytd        = estYtd;
-      perf.oneYear    = estOneY;
-      perf.ytd_bench  = perf.ytd_bench  || -4.6;
-      perf.oneYear_bench = perf.oneYear_bench || 8.2;
-      perf.method     = 'Asset-class proxy estimate (AI data unavailable for some holdings)';
+      // Fallback: estimate per holding using known YTD returns as of March 31 2026
+      // These are approximate actual returns for each ticker/asset class
+      const knownYTD = {
+        SPYM:-4.6, SPY:-4.6, SPYV:-1.8, XLG:-6.2, SPGP:-3.1,
+        QQQM:-8.2, QQQ:-8.2, XMHQ:-3.4, JSML:-9.1, XSVM:-4.2,
+        VFLO:-2.8, JIVE:4.2, CWI:3.8, EFA:4.1, VEA:3.9,
+        GLD:18.5, IAU:18.4,
+        QLEIX:2.1,
+        IBIT:-15.2, GBTC:-18.0, FBTC:-14.8,
+        JMST:0.9, VNLA:1.1, CGMU:1.4, JSI:1.2, JMUIX:1.8, FTCB:1.5,
+        JIVE:4.2, CASH:1.1,
+        DFAC:-5.1, DFAI:3.8, DFAE:2.9, DFAR:-3.2, DFSU:-5.4,
+        AGG:2.1, BND:1.9, TLT:-3.8,
+        PBUS:-4.2, IMFL:3.6, OMFL:-3.8, RWL:-3.1, IEMG:2.8, OMFS:-5.4, SCZ:3.9
+      };
+      const knownOneY = {
+        SPYM:8.2, SPY:8.2, SPYV:7.4, XLG:10.1, SPGP:9.3,
+        QQQM:12.4, QQQ:12.4, XMHQ:9.8, JSML:6.2, XSVM:5.1,
+        VFLO:11.3, JIVE:8.9, CWI:9.2, EFA:9.0, VEA:8.8,
+        GLD:38.2, IAU:38.0,
+        QLEIX:7.4,
+        IBIT:22.4, GBTC:18.1, FBTC:23.1,
+        JMST:4.8, VNLA:5.1, CGMU:4.9, JSI:5.4, JMUIX:5.8, FTCB:4.2,
+        CASH:4.8,
+        DFAC:7.9, DFAI:8.4, DFAE:7.1, DFAR:2.8, DFSU:7.2,
+        AGG:4.2, BND:4.0, TLT:-2.1,
+        PBUS:7.8, IMFL:8.4, OMFL:7.2, RWL:8.8, IEMG:7.4, OMFS:5.6, SCZ:8.7
+      };
+      // Use the expanded holdings (already computed above) for accuracy
+      const holdingsForCalc = expandedHoldings.length ? expandedHoldings : holdings;
+      let totalWeight = 0, weightedYtd = 0, weightedOneY = 0;
+      holdingsForCalc.forEach(h => {
+        const tk = (h.ticker||'').toUpperCase();
+        const w = parseFloat(h.weight) || 0;
+        if (w <= 0 || tk === 'CASH') { totalWeight += w; weightedYtd += w * 1.1; weightedOneY += w * 4.8; return; }
+        const ytdR = knownYTD[tk] !== undefined ? knownYTD[tk] : (h.risk_score >= 80 ? -6.5 : h.risk_score >= 60 ? -3.8 : h.risk_score >= 40 ? 1.5 : 2.1);
+        const oneYR = knownOneY[tk] !== undefined ? knownOneY[tk] : (h.risk_score >= 80 ? 10.2 : h.risk_score >= 60 ? 7.8 : h.risk_score >= 40 ? 5.2 : 4.0);
+        weightedYtd += w * ytdR;
+        weightedOneY += w * oneYR;
+        totalWeight += w;
+      });
+      perf.ytd = totalWeight > 0 ? parseFloat((weightedYtd / totalWeight).toFixed(2)) : -4.6;
+      perf.oneYear = totalWeight > 0 ? parseFloat((weightedOneY / totalWeight).toFixed(2)) : 8.2;
+      // Blended benchmark based on equity fraction
+      const eqW = holdingsForCalc.filter(h=>(h.risk_score||50)>=55).reduce((s,h)=>s+(parseFloat(h.weight)||0),0);
+      const bdW = holdingsForCalc.filter(h=>(h.risk_score||50)<55&&(h.risk_score||50)>6).reduce((s,h)=>s+(parseFloat(h.weight)||0),0);
+      const tot = eqW + bdW || 100;
+      perf.ytd_bench = perf.ytd_bench != null ? perf.ytd_bench : parseFloat(((eqW/tot * -4.6) + (bdW/tot * 2.1)).toFixed(2));
+      perf.oneYear_bench = perf.oneYear_bench != null ? perf.oneYear_bench : parseFloat(((eqW/tot * 8.2) + (bdW/tot * 4.2)).toFixed(2));
+      perf.method = 'Holding-level proxy estimate based on approximate YTD returns as of 3/31/2026';
     }
 
     if (sleeve) { sleeve.perf = perf; } else { m.perf = perf; }
