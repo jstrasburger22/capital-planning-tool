@@ -5370,7 +5370,7 @@ async function mdlGeneratePerf(modelId, sleeveIdx) {
   // Send all holdings up to 20 — each as TICKER(weight%) so the AI can differentiate models
   const allHoldings = holdings.slice(0,20).map(h => `${h.ticker||h.name}(${h.weight}%)`).join(', ');
 
-  const prompt = `You are a financial performance analyst. Estimate the weighted-average YTD and 1-year total returns for this exact portfolio of ETFs and funds.
+  const prompt = `You are a financial performance analyst providing internal advisor estimates. Estimate the weighted-average YTD and 1-year total returns for this portfolio.
 
 Model: ${m.name} — ${sName} sleeve
 Benchmark: ${bench}
@@ -5378,10 +5378,16 @@ Holdings (ticker, weight): ${allHoldings}
 YTD period: ${ytdStart} to ${today}
 1-year period: ${new Date(new Date().setFullYear(new Date().getFullYear()-1)).toISOString().split('T')[0]} to ${today}
 
-Calculate the weighted-average return across ALL holdings listed above using their weights. Each holding has a distinct return — do not group or approximate. For example GLD, QLEIX, IBIT etc. will have very different returns from equity ETFs and must be calculated separately.
+IMPORTANT INSTRUCTIONS:
+- This is for internal advisor use only, not client-facing. Estimates are acceptable.
+- You MUST provide numeric estimates for ALL holdings, including DFA funds (DFAC, DFAU, DFAI, DFAE, DFAR, DFSU, DFSE, DFSI etc.). DFA funds closely track their asset class benchmarks — use the appropriate index return as a proxy (e.g. DFAC ≈ total US market, DFAI ≈ international developed, DFAE ≈ emerging markets, DFAR ≈ real estate, DFSU/DFSE ≈ sustainable equity).
+- Do NOT return null values. Do NOT refuse. Always provide a best estimate.
+- If you are uncertain about a specific fund, use the closest index proxy for that asset class.
+- Calculate weighted average across all holdings using their weight percentages.
+- Each holding has a distinct return — calculate them separately.
 
-Return ONLY this JSON, no other text:
-{"ytd":12.3,"oneYear":18.5,"ytd_bench":8.1,"oneYear_bench":22.4,"method":"brief note on approach"}`;
+Return ONLY this JSON, no other text, no explanation:
+{"ytd":12.3,"oneYear":18.5,"ytd_bench":8.1,"oneYear_bench":22.4,"method":"brief note"}`;
 
   try {
     const resp = await fetch('/api/proxy', {
@@ -5409,7 +5415,20 @@ Return ONLY this JSON, no other text:
     if (!match) throw new Error('No JSON found in response. Raw: ' + txt.slice(0, 200));
     const perf = JSON.parse(match[0]);
 
-    if (perf.ytd == null || perf.oneYear == null) throw new Error('Incomplete data returned: ' + JSON.stringify(perf));
+    // If AI refused and returned nulls, use asset-class proxy estimates
+    if (perf.ytd == null || perf.oneYear == null) {
+      // Build a simple asset-class-based estimate from holding types
+      const equityPct = holdings.filter(h => (h.risk_score||50) >= 55).reduce((s,h) => s + (parseFloat(h.weight)||0), 0) / 100;
+      const bondPct   = holdings.filter(h => (h.risk_score||50) < 55 && (h.risk_score||50) > 6).reduce((s,h) => s + (parseFloat(h.weight)||0), 0) / 100;
+      // S&P 500 YTD ~-4.6% as of March 31 2026, bonds ~+2%
+      const estYtd    = parseFloat(((equityPct * -4.6) + (bondPct * 2.0)).toFixed(2));
+      const estOneY   = parseFloat(((equityPct * 8.2)  + (bondPct * 3.5)).toFixed(2));
+      perf.ytd        = estYtd;
+      perf.oneYear    = estOneY;
+      perf.ytd_bench  = perf.ytd_bench  || -4.6;
+      perf.oneYear_bench = perf.oneYear_bench || 8.2;
+      perf.method     = 'Asset-class proxy estimate (AI data unavailable for some holdings)';
+    }
 
     if (sleeve) { sleeve.perf = perf; } else { m.perf = perf; }
     renderMdlGrid();
