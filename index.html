@@ -1973,7 +1973,8 @@ async function analyzePortfolio() {
     // ── Step 3: API call with automatic retry on truncation ──
     document.getElementById('az-status-sub').textContent = 'Analyzing holdings…';
 
-    async function callProxy(tokensLimit) {
+    async function callProxy(tokensLimit, attempt = 0) {
+      if (attempt > 0) await new Promise(r => setTimeout(r, 2000 * attempt));
       const resp = await fetch('/api/proxy', {
         method: 'POST',
         headers: getApiHeaders(),
@@ -1983,6 +1984,11 @@ async function analyzePortfolio() {
           messages: [{ role: 'user', content: [...fileContent, { type:'text', text: prompt }] }]
         })
       });
+      if (resp.status === 529 || resp.status === 500 || resp.status === 503) {
+        if (attempt >= 2) throw new Error('Server overloaded — please wait a moment and try again');
+        document.getElementById('az-status-sub').textContent = 'Server busy — retrying…';
+        return callProxy(tokensLimit, attempt + 1);
+      }
       if (!resp.ok) {
         const errBody = await resp.json().catch(() => ({}));
         throw new Error(`API error ${resp.status}: ${errBody?.error?.message || resp.statusText}`);
@@ -5390,22 +5396,31 @@ Return ONLY this JSON, no other text, no explanation:
 {"ytd":12.3,"oneYear":18.5,"ytd_bench":8.1,"oneYear_bench":22.4,"method":"brief note"}`;
 
   try {
-    const resp = await fetch('/api/proxy', {
-      method: 'POST',
-      headers: getApiHeaders(),
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 500,
-        messages: [{ role: 'user', content: prompt }]
-      })
-    });
-
-    if (!resp.ok) {
-      const errBody = await resp.json().catch(() => ({}));
-      throw new Error('API ' + resp.status + ': ' + (errBody?.error?.message || resp.statusText));
+    // Retry up to 3 times on overload (529) or server errors (500)
+    async function fetchWithRetry(body, attempts = 3) {
+      for (let i = 0; i < attempts; i++) {
+        if (i > 0) {
+          if (btn) btn.innerHTML = '<span style="font-size:.85rem">⏳</span> Retrying…';
+          await new Promise(r => setTimeout(r, 2000 * i));
+        }
+        const r = await fetch('/api/proxy', { method:'POST', headers:getApiHeaders(), body:JSON.stringify(body) });
+        if (r.status === 529 || r.status === 500 || r.status === 503) {
+          if (i === attempts - 1) throw new Error('Overloaded — please try again in a moment');
+          continue;
+        }
+        if (!r.ok) {
+          const errBody = await r.json().catch(() => ({}));
+          throw new Error('API ' + r.status + ': ' + (errBody?.error?.message || r.statusText));
+        }
+        return await r.json();
+      }
     }
 
-    const data = await resp.json();
+    const data = await fetchWithRetry({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 500,
+      messages: [{ role: 'user', content: prompt }]
+    });
     if (data.error) throw new Error(data.error.message || 'API returned error');
 
     const txt = (data.content || []).filter(b => b.type === 'text').map(b => b.text || '').join('').replace(/```json|```/g, '').trim();
