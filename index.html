@@ -4811,28 +4811,44 @@ function renderMdlCard(m) {
     </div>
 
     <!-- ── PERFORMANCE ── -->
-    <div style="background:#fff;padding:14px 20px 10px">
-      <div style="display:grid;grid-template-columns:1fr 1px 1fr;gap:0;margin-bottom:10px">
-        <div style="text-align:center;padding:4px 10px 4px 0">
-          <div style="font-size:.52rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#a8b8cc;margin-bottom:4px">YTD</div>
-          <div class="${pCls(ytd)}" id="ytd-${m.id}-${sleeveIdx}" style="font-family:'Playfair Display',serif;font-size:1.25rem;font-weight:700">${fmtP(ytd)}${diffSpan(ytd,ytdBench)}</div>
-          <div style="font-size:.58rem;color:#a8b8cc;margin-top:2px">${ytdBench!=null?'Bench: '+fmtP(ytdBench):'vs '+bench}</div>
+    <div style="background:linear-gradient(180deg,#f9f7f3 0%,#fff 100%);padding:16px 20px 14px;border-bottom:1px solid #eee8e0">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+        <div style="font-size:.52rem;font-weight:700;letter-spacing:.13em;text-transform:uppercase;color:#a8b8cc">Performance</div>
+        <div style="font-size:.56rem;color:#a8b8cc;font-style:italic">vs ${bench}</div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
+        <!-- YTD -->
+        <div style="background:#fff;border:1.5px solid #eee8e0;border-radius:12px;padding:12px 14px;position:relative;overflow:hidden">
+          <div style="position:absolute;top:0;left:0;right:0;height:3px;background:${ytd==null?'#e8e4dc':ytd>=0?'linear-gradient(90deg,#1d7a50,#22c07a)':'linear-gradient(90deg,#c0392b,#e74c3c)'}"></div>
+          <div style="font-size:.5rem;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:#a8b8cc;margin-bottom:6px">YTD Return</div>
+          <div id="ytd-${m.id}-${sleeveIdx}" style="font-family:'Playfair Display',serif;font-size:1.4rem;font-weight:700;color:${ytd==null?'#c8c0b8':ytd>=0?'#1d7a50':'#c0392b'};line-height:1">${fmtP(ytd)}</div>
+          ${ytdBench!=null?`<div style="font-size:.56rem;color:#a8b8cc;margin-top:5px;display:flex;align-items:center;gap:3px">
+            <span>Bench ${fmtP(ytdBench)}</span>
+            <span style="font-weight:700;color:${(ytd-ytdBench)>=0?'#1d7a50':'#c0392b'}">${(ytd-ytdBench)>=0?'▲':'▼'} ${Math.abs(ytd-ytdBench).toFixed(1)}%</span>
+          </div>`:`<div style="font-size:.56rem;color:#c8c0b8;margin-top:5px;font-style:italic">click generate</div>`}
         </div>
-        <div style="background:#f0eee8;margin:4px 0"></div>
-        <div style="text-align:center;padding:4px 0 4px 10px">
-          <div style="font-size:.52rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#a8b8cc;margin-bottom:4px">1 Year</div>
-          <div class="${pCls(oneY)}" id="oney-${m.id}-${sleeveIdx}" style="font-family:'Playfair Display',serif;font-size:1.25rem;font-weight:700">${fmtP(oneY)}${diffSpan(oneY,oneYBench)}</div>
-          <div style="font-size:.58rem;color:#a8b8cc;margin-top:2px">${oneYBench!=null?'Bench: '+fmtP(oneYBench):'vs '+bench}</div>
+        <!-- 1 Year -->
+        <div style="background:#fff;border:1.5px solid #eee8e0;border-radius:12px;padding:12px 14px;position:relative;overflow:hidden">
+          <div style="position:absolute;top:0;left:0;right:0;height:3px;background:${oneY==null?'#e8e4dc':oneY>=0?'linear-gradient(90deg,#2563a8,#3b82f6)':'linear-gradient(90deg,#c0392b,#e74c3c)'}"></div>
+          <div style="font-size:.5rem;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:#a8b8cc;margin-bottom:6px">1-Year Return</div>
+          <div id="oney-${m.id}-${sleeveIdx}" style="font-family:'Playfair Display',serif;font-size:1.4rem;font-weight:700;color:${oneY==null?'#c8c0b8':oneY>=0?'#2563a8':'#c0392b'};line-height:1">${fmtP(oneY)}</div>
+          ${oneYBench!=null?`<div style="font-size:.56rem;color:#a8b8cc;margin-top:5px;display:flex;align-items:center;gap:3px">
+            <span>Bench ${fmtP(oneYBench)}</span>
+            <span style="font-weight:700;color:${(oneY-oneYBench)>=0?'#1d7a50':'#c0392b'}">${(oneY-oneYBench)>=0?'▲':'▼'} ${Math.abs(oneY-oneYBench).toFixed(1)}%</span>
+          </div>`:`<div style="font-size:.56rem;color:#c8c0b8;margin-top:5px;font-style:italic">click generate</div>`}
         </div>
       </div>
-      <!-- Generate button — styled like the sleeve pills / maroon pill -->
+      <!-- Generate button — polished CTA -->
       <button id="gen-${m.id}-${sleeveIdx}"
         onclick="event.stopPropagation();mdlGeneratePerf('${m.id}',${sleeveIdx})"
-        style="width:100%;padding:8px 16px;border-radius:999px;border:1.5px solid rgba(40,0,6,.2);
-               background:transparent;font-family:'Nunito Sans',sans-serif;font-size:.68rem;font-weight:700;
-               color:#1b2b3a;letter-spacing:.04em;cursor:pointer;transition:all .2s;
-               display:flex;align-items:center;justify-content:center;gap:6px">
-        ⚡ Generate YTD &amp; 1-Year Performance
+        style="width:100%;padding:10px 16px;border-radius:10px;
+               border:1.5px solid #cda561;
+               background:linear-gradient(135deg,#1b2b3a,#2d3f4f);
+               font-family:'Nunito Sans',sans-serif;font-size:.72rem;font-weight:700;
+               color:#cda561;letter-spacing:.05em;cursor:pointer;transition:all .22s;
+               display:flex;align-items:center;justify-content:center;gap:8px;
+               box-shadow:0 2px 8px rgba(27,43,58,.15)">
+        <span style="font-size:.85rem">⚡</span> Generate Performance
       </button>
     </div>
 
@@ -5310,10 +5326,9 @@ async function mdlGeneratePerf(modelId, sleeveIdx) {
   const ytdEl  = document.getElementById(`ytd-${modelId}-${sleeveIdx}`);
   const oneyEl = document.getElementById(`oney-${modelId}-${sleeveIdx}`);
 
-  if (btn) { btn.textContent = '⏳ Calculating…'; btn.disabled = true; btn.style.background = '#202e3b'; btn.style.color = '#fff'; btn.style.borderColor = '#202e3b'; }
-  // Show placeholder in YTD and 1yr cells while loading
-  if (ytdEl)  { ytdEl.innerHTML  = '<span style="color:#a8b8cc;font-size:.75rem;font-style:italic">calculating…</span>'; }
-  if (oneyEl) { oneyEl.innerHTML = '<span style="color:#a8b8cc;font-size:.75rem;font-style:italic">calculating…</span>'; }
+  if (btn) { btn.innerHTML = '<span style="font-size:.85rem">⏳</span> Searching live data…'; btn.disabled = true; btn.style.opacity = '0.75'; }
+  if (ytdEl)  { ytdEl.style.color = '#a8b8cc'; ytdEl.textContent = '…'; }
+  if (oneyEl) { oneyEl.style.color = '#a8b8cc'; oneyEl.textContent = '…'; }
 
   // Determine which sleeve / holdings to use
   const sleeve   = m.sleeves ? m.sleeves[sleeveIdx] : null;
@@ -5350,36 +5365,38 @@ async function mdlGeneratePerf(modelId, sleeveIdx) {
   const sName    = sleeve ? sleeve.name : 'Current';
   const bench    = m.benchmark || 'S&P 500'; // Always model-level — never sleeve-level
 
-  const prompt = `You are a precise financial performance analyst. Calculate estimated YTD and 1-year returns for this investment model sleeve.
+  const prompt = `You are a precise financial performance analyst. Your job is to calculate accurate YTD and 1-year total returns for this investment model.
 
 MODEL: ${m.name} — ${sName} sleeve
 BENCHMARK: ${bench}
-HOLDINGS: ${holdingsList || '(see combo context)'}${comboContext}
+CURRENT HOLDINGS: ${holdingsList || '(see combo context)'}${comboContext}
 
-TRADE LOG (most recent first, last 30 events):
-${eventsText || '(No trades logged — assume holdings unchanged)'}
+TRADE LOG (changes to holdings, most recent first):
+${eventsText || '(No trades logged — holdings unchanged since inception)'}
 
 TODAY: ${today}
 YTD PERIOD: ${ytdStart} to ${today}
 1-YEAR PERIOD: ${new Date(new Date().setFullYear(new Date().getFullYear()-1)).toISOString().split('T')[0]} to ${today}
 
 INSTRUCTIONS:
-- Use your knowledge of each ETF/fund's actual historical price returns
-- The trade log shows when holdings CHANGED. Calculate a time-weighted blended return:
-  • For each period between trades, compute the return of that period's holdings
-  • Weight each sub-period return by its fraction of the total measurement period
-  • This gives a more accurate return than just using current holdings
-- For the benchmark (${bench}), use actual known returns for these periods
-- If a holding is a combination model allocation, use the weighted holdings within it
+1. Use web_search to look up the actual YTD and 1-year total return for EACH ticker in the current holdings. Search for "[TICKER] ETF total return YTD 2025" and "[TICKER] 1 year total return".
+2. Also search for the benchmark return: "${bench} YTD return 2025" and "${bench} 1 year total return".
+3. Calculate the weighted average return using each holding's weight percentage.
+4. If the trade log shows holdings changed during the period, calculate a time-weighted return:
+   - For each sub-period between trades, look up returns for those holdings
+   - Weight each sub-period by its fraction of the total measurement period
+5. Return the final blended model return and benchmark return.
+
+Search for real data — do not estimate from memory alone.
 
 Return ONLY this JSON (no markdown, no explanation):
-{"ytd":12.3,"oneYear":18.5,"ytd_bench":8.1,"oneYear_bench":22.4,"method":"one sentence describing the calculation approach"}`;
+{"ytd":12.3,"oneYear":18.5,"ytd_bench":8.1,"oneYear_bench":22.4,"method":"brief description of tickers used and data sources"}`;
 
   try {
     const resp = await fetch('/api/proxy', {
       method:'POST', headers: getApiHeaders(),
       body: JSON.stringify({
-        model:'claude-sonnet-4-6', max_tokens:600,
+        model:'claude-sonnet-4-6', max_tokens:4000,
         tools:[{type:'web_search_20250305',name:'web_search'}],
         messages:[{role:'user',content:prompt}]
       })
@@ -5401,7 +5418,7 @@ Return ONLY this JSON (no markdown, no explanation):
     renderMdlGrid();
   } catch(e) {
     console.error('Generate perf error:', e);
-    if (btn) { btn.textContent = '⚡ Generate'; btn.disabled = false; btn.style.background = btn.style.color = btn.style.borderColor = ''; }
+    if (btn) { btn.innerHTML = '<span style="font-size:.85rem">⚡</span> Generate Performance'; btn.disabled = false; btn.style.opacity = '1'; }
     if (ytdEl)  ytdEl.innerHTML = '—';
     if (oneyEl) oneyEl.innerHTML = '—';
   }
