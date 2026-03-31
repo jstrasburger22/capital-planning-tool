@@ -1,30 +1,38 @@
 export default {
   async fetch(request, env) {
-    if (request.method === 'OPTIONS') {
-      return new Response(null, {
+    const url = new URL(request.url);
+
+    // Only handle proxy requests
+    if (url.pathname === '/api/proxy') {
+      if (request.method === 'OPTIONS') {
+        return new Response(null, {
+          headers: {
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'POST, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type',
+          }
+        });
+      }
+      const body = await request.json();
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
         headers: {
+          'Content-Type': 'application/json',
+          'anthropic-version': '2023-06-01',
+          'x-api-key': env.ANTHROPIC_API_KEY,
+        },
+        body: JSON.stringify(body),
+      });
+      const data = await response.json();
+      return new Response(JSON.stringify(data), {
+        headers: {
+          'Content-Type': 'application/json',
           'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Methods': 'POST, OPTIONS',
-          'Access-Control-Allow-Headers': 'Content-Type',
         }
       });
     }
-    const body = await request.json();
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'anthropic-version': '2023-06-01',
-        'x-api-key': env.ANTHROPIC_API_KEY,
-      },
-      body: JSON.stringify(body),
-    });
-    const data = await response.json();
-    return new Response(JSON.stringify(data), {
-      headers: {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*',
-      }
-    });
+
+    // All other requests — serve the static site normally
+    return env.ASSETS.fetch(request);
   }
 };
