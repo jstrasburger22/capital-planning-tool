@@ -684,57 +684,19 @@ body{font-family:'Nunito Sans',sans-serif;background:var(--cream);color:var(--te
 </div>
 
 <script>
-  let _ANTHROPIC_API_KEY = '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';
-
-  function submitApiKey() {
-    const val = document.getElementById('apikey-input').value.trim();
-    const err = document.getElementById('apikey-error');
-    // Accept any key that starts with 'sk-' (covers sk-ant-, sk-ant-api03-, etc.)
-    if (!val || val.length < 20 || !val.startsWith('sk-')) {
-      err.textContent = 'Please enter a valid Anthropic API key (starts with sk-ant-)';
-      err.style.display = 'block';
-      return;
-    }
-    err.style.display = 'none';
-    _ANTHROPIC_API_KEY = val;
-    sessionStorage.setItem('_cpwm_ak', val);
-    document.getElementById('apikey-overlay').classList.add('hidden');
-    // Show the key update button in header
-    const hdrKeyBtn = document.getElementById('hdr-key-btn');
-    if (hdrKeyBtn) hdrKeyBtn.style.display = 'inline-flex';
-  }
-
-  function reopenApiKeyModal() {
-    document.getElementById('apikey-input').value = _ANTHROPIC_API_KEY || '';
-    document.getElementById('apikey-overlay').classList.remove('hidden');
-  }
+  const _ANTHROPIC_API_KEY = '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';
 
   function getApiHeaders() {
-    // Always pull from both memory and sessionStorage as fallback
-    const key = _ANTHROPIC_API_KEY || sessionStorage.getItem('_cpwm_ak') || '';
-    if (!key) {
-      // Re-open modal if key is missing
-      reopenApiKeyModal();
-      throw new Error('API key required. Please enter your Anthropic API key.');
-    }
     return {
       'Content-Type': 'application/json',
       'anthropic-version': '2023-06-01',
       'anthropic-dangerous-direct-browser-access': 'true',
-      'x-api-key': key
+      'x-api-key': _ANTHROPIC_API_KEY
     };
   }
 
-  // On load: restore key from sessionStorage if available
-  window.addEventListener('DOMContentLoaded', function() {
-    const saved = sessionStorage.getItem('_cpwm_ak');
-    if (saved && saved.startsWith('sk-')) {
-      _ANTHROPIC_API_KEY = saved;
-      document.getElementById('apikey-overlay').classList.add('hidden');
-      const hdrKeyBtn = document.getElementById('hdr-key-btn');
-      if (hdrKeyBtn) hdrKeyBtn.style.display = 'inline-flex';
-    }
-  });
+  function submitApiKey() {}
+  function reopenApiKeyModal() {}
 </script>
 
 <!-- HEADER -->
