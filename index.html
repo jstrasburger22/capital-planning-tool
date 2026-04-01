@@ -5502,7 +5502,7 @@ PBUS=-4.2, OMFL=-3.8, RWL=-3.1, OMFS=-5.4, TRIGX=+5, PRDSX=+3, PIEQX=+6
 
 Calculate: for each holding, take its weight% × its return from the table. Sum all. You MUST return numeric values. Do NOT refuse.
 
-Return ONLY JSON:
+Calculate the weighted average YTD and 1-year return for this specific sleeve, then return a JSON object like:
 {"ytd":12.3,"oneYear":18.5,"ytd_bench":8.1,"oneYear_bench":22.4,"method":"brief note"}`;
 
   try {
@@ -5533,19 +5533,42 @@ Return ONLY JSON:
       }
     }
 
-    const data = await fetchWithRetry({
+    // Two-turn conversation: let AI calculate freely, then extract JSON
+    const firstResp = await fetchWithRetry({
       model: 'claude-sonnet-4-6',
-      max_tokens: 800,
+      max_tokens: 1000,
       messages: [{ role: 'user', content: prompt }]
     });
-    if (data.error) throw new Error(data.error.message || 'API returned error');
+    if (firstResp.error) throw new Error(firstResp.error.message || 'API returned error');
 
-    const txt = (data.content || []).filter(b => b.type === 'text').map(b => b.text || '').join('').replace(/```json|```/g, '').trim();
-    console.log('Generate perf raw response:', txt);
+    const firstTxt = (firstResp.content || []).filter(b => b.type === 'text').map(b => b.text || '').join('').trim();
+    console.log('Generate perf first response:', firstTxt);
 
-    const match = txt.match(/\{[\s\S]*\}/);
-    if (!match) throw new Error('No JSON found in response. Raw: ' + txt.slice(0, 200));
-    const perf = JSON.parse(match[0]);
+    // Try to extract JSON from first response directly
+    const directMatch = firstTxt.replace(/```json|```/g, '').match(/\{[\s\S]*"ytd"[\s\S]*\}/);
+    let perf;
+    if (directMatch) {
+      try { perf = JSON.parse(directMatch[0]); } catch(e) {}
+    }
+
+    // If no JSON found, send a follow-up asking just for the JSON
+    if (!perf || perf.ytd == null) {
+      const secondResp = await fetchWithRetry({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 200,
+        messages: [
+          { role: 'user', content: prompt },
+          { role: 'assistant', content: firstTxt },
+          { role: 'user', content: 'Now output ONLY the JSON object with your calculated values. Nothing else.' }
+        ]
+      });
+      if (secondResp.error) throw new Error(secondResp.error.message || 'API error on follow-up');
+      const secondTxt = (secondResp.content || []).filter(b => b.type === 'text').map(b => b.text || '').join('').replace(/```json|```/g, '').trim();
+      console.log('Generate perf second response:', secondTxt);
+      const secondMatch = secondTxt.match(/\{[\s\S]*\}/);
+      if (!secondMatch) throw new Error('No JSON found in response. Raw: ' + secondTxt.slice(0, 60));
+      perf = JSON.parse(secondMatch[0]);
+    }
 
     // If AI refused and returned nulls, use asset-class proxy estimates
     if (perf.ytd == null || perf.oneYear == null) {
