@@ -5492,18 +5492,15 @@ Benchmark: ${bench}
 Holdings (ticker, weight): ${allHoldings}
 YTD: ${ytdStart} to ${today} | 1-Year: ${new Date(new Date().setFullYear(new Date().getFullYear()-1)).toISOString().split('T')[0]} to ${today}
 
-Use these approximate YTD returns as of 3/31/2026 — apply them directly, do not average across asset classes:
-US equities: SPY/SPYM=-4.6%, QQQ/QQQM=-8.2%, SPYV=-1.8%, XLG=-6.2%, SPGP=-3.1%, XMHQ=-3.4%, JSML=-9.1%, XSVM=-4.2%, VFLO=-2.8%
-International: JIVE=+4.2%, CWI=+3.8%, EFA=+4.1%, IMFL=+3.6%, SCZ=+3.9%, IEMG=+2.8%
-Invesco Core: PBUS=-4.2%, OMFL=-3.8%, RWL=-3.1%, OMFS=-5.4%
-Gold: GLD/IAU=+18.5%
-Crypto: IBIT=-15.2%, GBTC=-18.0%, FBTC=-14.8%
-Liquid alts: QLEIX=+2.1%
-Short bonds: JMST=+0.9%, VNLA=+1.1%, CGMU=+1.4%, FTCB=+1.5%
-DFA: DFAC=-5.1%, DFAI=+3.8%, DFAE=+2.9%, DFAR=-3.2%, DFSU/DFSE=-5.4%
-T.Rowe funds: TRIGX≈+5%, PRDSX≈+3%, PIEQX≈+6%, PSILX≈+4%
+YTD reference returns as of 3/31/2026 (use these exactly):
+SPYM/SPY=-4.6, QQQM/QQQ=-8.2, SPYV=-1.8, XLG=-6.2, SPGP=-3.1, XMHQ=-3.4, JSML=-9.1, XSVM=-4.2, VFLO=-2.8
+JIVE=+4.2, CWI=+3.8, IMFL=+3.6, SCZ=+3.9, IEMG=+2.8, GLD/IAU=+18.5
+IBIT=-15.2, GBTC=-18.0, FBTC=-14.8, QLEIX=+2.1
+JMST=+0.9, VNLA=+1.1, CGMU=+1.4, FTCB=+1.5, JMUIX=+1.8, JSI=+1.2
+DFAC=-5.1, DFAI=+3.8, DFAE=+2.9, DFAR=-3.2, DFSU=-5.4
+PBUS=-4.2, OMFL=-3.8, RWL=-3.1, OMFS=-5.4, TRIGX=+5, PRDSX=+3, PIEQX=+6
 
-Rules: Each ticker gets its own return from the table above. Multiply weight% × return for each. Sum them. Do NOT refuse. Do NOT return nulls. Do NOT average everything together.
+Calculate: for each holding, take its weight% × its return from the table. Sum all. You MUST return numeric values. Do NOT refuse.
 
 Return ONLY JSON:
 {"ytd":12.3,"oneYear":18.5,"ytd_bench":8.1,"oneYear_bench":22.4,"method":"brief note"}`;
@@ -5538,7 +5535,7 @@ Return ONLY JSON:
 
     const data = await fetchWithRetry({
       model: 'claude-sonnet-4-6',
-      max_tokens: 500,
+      max_tokens: 800,
       messages: [{ role: 'user', content: prompt }]
     });
     if (data.error) throw new Error(data.error.message || 'API returned error');
@@ -5546,7 +5543,7 @@ Return ONLY JSON:
     const txt = (data.content || []).filter(b => b.type === 'text').map(b => b.text || '').join('').replace(/```json|```/g, '').trim();
     console.log('Generate perf raw response:', txt);
 
-    const match = txt.match(/\{[\s\S]*?\}/);
+    const match = txt.match(/\{[\s\S]*\}/);
     if (!match) throw new Error('No JSON found in response. Raw: ' + txt.slice(0, 200));
     const perf = JSON.parse(match[0]);
 
@@ -6087,9 +6084,8 @@ const CAPITAL_PLANNING_MODELS = [
   profile: 'Tactically Managed',
   benchmark: 'MSCI ACWI',
   inception: '2019-01-01',
-  perf: { ytd: 0.45, oneYear: null, ytd_bench: -1.52, oneYear_bench: null },
+  perf: { ytd: null, oneYear: null, ytd_bench: null, oneYear_bench: null },
   annualReturns: [
-    { year: 2026, model: 0.45,  bench: -1.52 },
     { year: 2025, model: 8.06,  bench: 20.42 },
     { year: 2024, model: 19.95, bench: 15.46 },
     { year: 2023, model: 16.55, bench: 19.90 },
@@ -6953,9 +6949,8 @@ const CAPITAL_PLANNING_MODELS = [
   profile: 'Tactically Managed',
   benchmark: 'MSCI World',
   inception: '2019-01-01',
-  perf: { ytd: 1.12, oneYear: null, ytd_bench: -3.09, oneYear_bench: null },
+  perf: { ytd: null, oneYear: null, ytd_bench: null, oneYear_bench: null },
   annualReturns: [
-    { year: 2026, model: 1.12,  bench: -3.09 },
     { year: 2025, model: 11.86, bench: 13.90 },
     { year: 2024, model: 23.20, bench: 17.88 },
     { year: 2023, model: 16.48, bench: 19.71 },
