@@ -5566,10 +5566,8 @@ Return ONLY JSON:
 
   } catch(e) {
     console.error('Generate perf error:', e);
-    console.error('Performance generation failed:', e.message);
-    if (btn) { btn.innerHTML = '<span style="font-size:.85rem">⚡</span> Generate Performance'; btn.disabled = false; btn.style.opacity = '1'; }
-    if (ytdEl) ytdEl.style.color = '#c0392b';
-    if (oneyEl) oneyEl.style.color = '#c0392b';
+    const msg = e.message || 'Unknown error';
+    if (btn) { btn.innerHTML = '⚠️ ' + msg.slice(0,60); btn.disabled = false; btn.style.opacity = '1'; btn.style.fontSize = '.6rem'; }
     if (ytdEl)  ytdEl.innerHTML = '—';
     if (oneyEl) oneyEl.innerHTML = '—';
   }
