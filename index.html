@@ -2311,6 +2311,51 @@ function sortAccount(ai, col) {
   }
 }
 
+// Format a raw portfolio name into a clean client-facing title.
+// Examples:
+//   "Freda - SWM Portfolio"              -> "Freda's Portfolio"
+//   "John & Mary - LPL Account"          -> "John & Mary's Portfolio"
+//   "Robert & Linda Matthews"            -> "Robert & Linda Matthews's Portfolio"
+//   "Smith Family Trust - SWM"           -> "Smith Family Trust Portfolio"
+//   "Freda's Portfolio"                  -> "Freda's Portfolio" (already clean, untouched)
+//   "Sample — Robert & Linda Matthews"   -> "Robert & Linda Matthews's Portfolio"
+//   ""  / null  / "Client Portfolio"     -> "Client Portfolio"
+function formatPortfolioTitle(raw) {
+  if (!raw) return 'Client Portfolio';
+  let s = String(raw).trim();
+  if (!s || /^client portfolio$/i.test(s)) return 'Client Portfolio';
+
+  // Already in "Name's Portfolio" / "Names' Portfolio" form — leave it.
+  if (/['’]\s*s?\s+portfolio$/i.test(s)) return s;
+
+  // Strip leading "Sample —" / "Demo —" / "Example —" prefixes (used in sample data)
+  s = s.replace(/^(sample|demo|example|test)\s*[-–—:]\s*/i, '').trim();
+
+  // If a dash is present, take the LEFT side (the client name) and discard the
+  // right side (typically suffix junk like "SWM Portfolio", "LPL Account").
+  // This runs after the prefix strip so leading "Sample —" doesn't eat the name.
+  if (/\s+[-–—]\s+/.test(s)) {
+    s = s.split(/\s+[-–—]\s+/)[0].trim();
+  }
+
+  // Strip trailing generic suffix words ("Portfolio", "Account", "Brokerage", etc.)
+  // Repeat in case multiple stack up (e.g. "Freda Account Portfolio")
+  const trailingJunk = /\s+(portfolio|portfolios|account|accounts|brokerage|investments?|holdings|assets|ira|roth|advisory|swm|lpl)$/i;
+  while (trailingJunk.test(s)) s = s.replace(trailingJunk, '').trim();
+
+  if (!s) return 'Client Portfolio';
+
+  // Family Trust / Trust / LLC / Foundation — don't add possessive, just append "Portfolio"
+  if (/\b(trust|llc|foundation|estate|fund)\b/i.test(s)) {
+    return s + ' Portfolio';
+  }
+
+  // Always use 's possessive — grammatically correct for all singular names per
+  // modern style guides (AP, Chicago). Reads naturally for "Charles's", "Liz's",
+  // "Matthews's" alike.
+  return s + "'s Portfolio";
+}
+
 function renderPortfolio(data) {
   // Normalise: support both old {holdings:[]} and new {accounts:[]} shapes
   let accounts = data.accounts || [];
@@ -2348,7 +2393,7 @@ function renderPortfolio(data) {
     <div class="az-score-banner">
       <div style="flex:1;min-width:0">
         <div class="az-score-ey">AI-Powered Portfolio Risk Analysis</div>
-        <div class="az-score-title">${data.portfolio_name || 'Client Portfolio'}</div>
+        <div class="az-score-title">${formatPortfolioTitle(data.portfolio_name)}</div>
         <div class="az-bar-bg"><div class="az-bar-fill" id="az-bar" style="width:0%"></div></div>
         <div class="az-bar-cap"><span>Conservative (0)</span><span>Moderate (50)</span><span>Aggressive (100)</span></div>
       </div>
@@ -2647,6 +2692,7 @@ function recalcPortfolio() {
   ];
   if (allocGrid) allocGrid.innerHTML = allocBuckets
     .filter(b => b.val > 0)
+    .sort((a, b) => b.val - a.val)
     .map(b => `<div class="alloc-card"><div class="ac-label">${b.label}</div><div class="ac-value">${pct(b.val)}</div></div>`)
     .join('');
 }
