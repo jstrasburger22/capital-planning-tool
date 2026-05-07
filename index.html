@@ -712,7 +712,10 @@ body{font-family:'Nunito Sans',sans-serif;background:var(--cream);color:var(--te
       <button class="adv-menu-btn" onclick="toggleAdvMenu()">🔒 Advisor Tools ▾</button>
       <div class="adv-dropdown" id="adv-dropdown">
         <div class="adv-dd-item" onclick="showView('analyzer');closeAdvMenu()">📊 Portfolio Analyzer</div>
+        <!-- Investment Model Library hidden — code preserved for future use
         <div class="adv-dd-item" onclick="showView('models');closeAdvMenu()">🏛️ Investment Model Library</div>
+        -->
+        
       </div>
     </div>
   </div>
@@ -757,7 +760,7 @@ body{font-family:'Nunito Sans',sans-serif;background:var(--cream);color:var(--te
     </div>
     <button class="tc-btn tc-btn-advisor">Open Analyzer →</button>
   </div>
-  <div class="tool-card" onclick="showView('models')">
+  <div class="tool-card" onclick="showView('models')" style="display:none">
     <div class="tc-icon" style="background:linear-gradient(135deg,#e8f4f0,#d0ece6)">🏛️</div>
     <div class="tc-tag" style="background:linear-gradient(135deg,#e8f4f0,#d0ece6);color:#1d7a50">Advisor Tool</div>
     <div class="tc-title">Investment Model Library</div>
@@ -4260,6 +4263,21 @@ const TICKER_SCORES = {
   // ── TARGET DATE — PRINCIPAL ──
   PPLEX:62,PPLAX:62,PPLCX:62,
   PPMDX:56,PPMAX:56,PPMCX:56,
+
+  // ── LIQUID ALTERNATIVES / MULTISTRATEGY MUTUAL FUNDS ──
+  // Long-short equity, market neutral, managed futures, multi-strat
+  // Lower beta to equities than typical equity funds; risk scores reflect
+  // realized volatility and Morningstar within-category risk ratings.
+  QLEIX:50,QLENX:50,QLERX:50,         // AQR Long-Short Equity (beta ~0.3-0.5, low correlation)
+  QMNIX:30,QMNNX:30,                   // AQR Equity Market Neutral (beta ~0)
+  AQMIX:55,AQMNX:55,                   // AQR Managed Futures Strategy
+  QSPIX:55,QSPNX:55,                   // AQR Style Premia Alternative
+  QDSIX:45,QDSNX:45,                   // AQR Diversifying Strategies
+  FSMSX:40,FSMRX:40,                   // FS Multi-Strategy Alternatives (beta ~0.07)
+  WTMFX:45,                            // WisdomTree Managed Futures
+  BIVRX:50,                            // Blackstone Alternative Multi-Strategy
+  AHLPX:50,                            // American Beacon AHL Managed Futures
+  MFTFX:55,                            // Catalyst/Millburn Hedge Strategy
 
   // ── STRUCTURED NOTE RISK SCORES BY TYPE ──
   // These are placeholder scores used when name/CUSIP detection triggers classifyHolding()
