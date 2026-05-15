@@ -1,0 +1,832 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Market Regime Monitor — Capital Planning</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=DM+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --navy: #1C2E3C;
+    --navy-deep: #131F2A;
+    --navy-light: #2A4055;
+    --gold: #C9A84C;
+    --gold-light: #E8D5A3;
+    --cream: #F9F5EE;
+    --bull: #4A8E5C;
+    --bull-light: #6BB07D;
+    --bear: #B84747;
+    --bear-light: #D26B6B;
+    --neutral: #C9A84C;
+    --text-mute: #8A9AA8;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'DM Sans', sans-serif;
+    background: var(--navy-deep);
+    color: var(--cream);
+    min-height: 100vh;
+    padding: 24px;
+    background-image:
+      radial-gradient(at 20% 0%, rgba(201,168,76,0.05) 0px, transparent 50%),
+      radial-gradient(at 80% 100%, rgba(28,46,60,0.4) 0px, transparent 50%);
+  }
+  .container { max-width: 1400px; margin: 0 auto; }
+
+  /* Header */
+  .header {
+    border-bottom: 1px solid rgba(201,168,76,0.2);
+    padding-bottom: 20px;
+    margin-bottom: 32px;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    flex-wrap: wrap;
+    gap: 16px;
+  }
+  .brand {
+    display: flex;
+    flex-direction: column;
+  }
+  .brand-mark {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.3em;
+    color: var(--gold);
+    text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+  .title {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 42px;
+    font-weight: 500;
+    color: var(--cream);
+    line-height: 1;
+  }
+  .subtitle {
+    font-size: 13px;
+    color: var(--text-mute);
+    margin-top: 6px;
+    max-width: 600px;
+  }
+  .meta {
+    text-align: right;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--text-mute);
+  }
+  .meta .stamp { color: var(--gold); }
+  .meta .refresh-btn {
+    background: transparent;
+    border: 1px solid var(--gold);
+    color: var(--gold);
+    padding: 6px 14px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    cursor: pointer;
+    margin-top: 10px;
+    transition: all 0.2s;
+  }
+  .meta .refresh-btn:hover {
+    background: var(--gold);
+    color: var(--navy);
+  }
+
+  /* Regime Banner */
+  .regime-banner {
+    background: linear-gradient(135deg, var(--navy) 0%, var(--navy-light) 100%);
+    border-left: 4px solid var(--gold);
+    padding: 24px 28px;
+    margin-bottom: 28px;
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: 32px;
+    align-items: center;
+    position: relative;
+    overflow: hidden;
+  }
+  .regime-banner::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 200px;
+    height: 100%;
+    background: radial-gradient(circle at right, rgba(201,168,76,0.15), transparent 70%);
+    pointer-events: none;
+  }
+  .regime-score {
+    text-align: center;
+  }
+  .regime-score-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.2em;
+    color: var(--text-mute);
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+  .regime-score-value {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 64px;
+    font-weight: 600;
+    line-height: 1;
+    color: var(--gold);
+  }
+  .regime-score-suffix {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 14px;
+    color: var(--text-mute);
+  }
+  .regime-status {
+    border-left: 1px solid rgba(201,168,76,0.2);
+    padding-left: 28px;
+  }
+  .regime-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.2em;
+    color: var(--text-mute);
+    text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+  .regime-verdict {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 32px;
+    font-weight: 500;
+    margin-bottom: 8px;
+  }
+  .regime-verdict.bull { color: var(--bull-light); }
+  .regime-verdict.neutral { color: var(--gold); }
+  .regime-verdict.bear { color: var(--bear-light); }
+  .regime-summary {
+    font-size: 14px;
+    color: var(--cream);
+    opacity: 0.85;
+    max-width: 500px;
+    line-height: 1.5;
+  }
+  .regime-gauge {
+    position: relative;
+    z-index: 1;
+  }
+
+  /* Indicator Grid */
+  .indicators {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 20px;
+    margin-bottom: 28px;
+  }
+  @media (max-width: 1000px) {
+    .indicators { grid-template-columns: 1fr; }
+    .regime-banner { grid-template-columns: 1fr; text-align: center; }
+    .regime-status { border-left: none; padding-left: 0; border-top: 1px solid rgba(201,168,76,0.2); padding-top: 20px; }
+  }
+
+  .card {
+    background: var(--navy);
+    border: 1px solid rgba(201,168,76,0.15);
+    padding: 24px;
+    position: relative;
+    transition: border-color 0.3s;
+  }
+  .card:hover { border-color: rgba(201,168,76,0.4); }
+  .card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 16px;
+  }
+  .card-pill {
+    display: inline-block;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    padding: 4px 10px;
+    border-radius: 2px;
+    margin-bottom: 10px;
+  }
+  .pill-bull { background: rgba(74,142,92,0.15); color: var(--bull-light); border: 1px solid rgba(74,142,92,0.3); }
+  .pill-neutral { background: rgba(201,168,76,0.15); color: var(--gold); border: 1px solid rgba(201,168,76,0.3); }
+  .pill-bear { background: rgba(184,71,71,0.15); color: var(--bear-light); border: 1px solid rgba(184,71,71,0.3); }
+  .card-title {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 24px;
+    font-weight: 500;
+    margin-bottom: 4px;
+  }
+  .card-subtitle {
+    font-size: 12px;
+    color: var(--text-mute);
+  }
+  .card-value-row {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    margin: 18px 0 6px;
+  }
+  .card-value {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 36px;
+    font-weight: 500;
+    color: var(--cream);
+    line-height: 1;
+  }
+  .card-change {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    font-weight: 500;
+  }
+  .change-up { color: var(--bull-light); }
+  .change-down { color: var(--bear-light); }
+  .card-unit {
+    font-size: 12px;
+    color: var(--text-mute);
+    margin-bottom: 14px;
+  }
+  .chart-wrap {
+    height: 140px;
+    margin: 12px 0;
+    position: relative;
+  }
+  .threshold-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    padding-top: 16px;
+    border-top: 1px solid rgba(201,168,76,0.1);
+    margin-top: 12px;
+  }
+  .threshold {
+    font-size: 11px;
+  }
+  .threshold-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--text-mute);
+    margin-bottom: 3px;
+  }
+  .threshold-value {
+    color: var(--cream);
+    font-size: 12px;
+  }
+  .threshold .bull { color: var(--bull-light); }
+  .threshold .bear { color: var(--bear-light); }
+
+  /* Context section */
+  .context-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    margin-bottom: 28px;
+  }
+  @media (max-width: 900px) {
+    .context-grid { grid-template-columns: 1fr; }
+  }
+
+  .narrative {
+    background: var(--navy);
+    border: 1px solid rgba(201,168,76,0.15);
+    padding: 24px;
+  }
+  .narrative h3 {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 22px;
+    font-weight: 500;
+    margin-bottom: 14px;
+    color: var(--gold);
+  }
+  .narrative p {
+    font-size: 14px;
+    line-height: 1.65;
+    color: var(--cream);
+    opacity: 0.9;
+    margin-bottom: 10px;
+  }
+  .narrative ul {
+    list-style: none;
+    margin-top: 8px;
+  }
+  .narrative ul li {
+    font-size: 13px;
+    line-height: 1.6;
+    padding-left: 16px;
+    position: relative;
+    margin-bottom: 6px;
+    color: var(--cream);
+    opacity: 0.85;
+  }
+  .narrative ul li::before {
+    content: '—';
+    position: absolute;
+    left: 0;
+    color: var(--gold);
+  }
+
+  /* Footer */
+  .footer {
+    border-top: 1px solid rgba(201,168,76,0.15);
+    padding-top: 20px;
+    margin-top: 32px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: var(--text-mute);
+    text-align: center;
+    letter-spacing: 0.1em;
+  }
+  .footer span { color: var(--gold); }
+
+  /* Loading state */
+  .loading-shimmer {
+    background: linear-gradient(90deg, rgba(201,168,76,0.05) 0%, rgba(201,168,76,0.15) 50%, rgba(201,168,76,0.05) 100%);
+    background-size: 200% 100%;
+    animation: shimmer 1.8s infinite;
+    color: transparent;
+    border-radius: 2px;
+  }
+  @keyframes shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+
+  .error-banner {
+    background: rgba(184,71,71,0.1);
+    border: 1px solid rgba(184,71,71,0.3);
+    color: var(--bear-light);
+    padding: 12px 16px;
+    font-size: 12px;
+    margin-bottom: 20px;
+    display: none;
+  }
+  .error-banner.show { display: block; }
+
+  /* Gauge SVG */
+  .gauge-svg { display: block; }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <header class="header">
+    <div class="brand">
+      <div class="brand-mark">◆ Capital Planning Wealth Management</div>
+      <h1 class="title">Market Regime Monitor</h1>
+      <div class="subtitle">Three-factor framework tracking oil/inflation pressure, capex investment, and labor market health to flag when the bull market thesis may be deteriorating.</div>
+    </div>
+    <div class="meta">
+      <div>LIVE DATA · FRED + EIA</div>
+      <div class="stamp" id="dataStamp">Loading…</div>
+      <button class="refresh-btn" onclick="loadAll()">↻ Refresh Data</button>
+    </div>
+  </header>
+
+  <div class="error-banner" id="errorBanner"></div>
+
+  <section class="regime-banner">
+    <div class="regime-score">
+      <div class="regime-score-label">Composite Score</div>
+      <div><span class="regime-score-value" id="compositeScore">—</span><span class="regime-score-suffix"> / 100</span></div>
+    </div>
+    <div class="regime-status">
+      <div class="regime-label">Current Regime</div>
+      <div class="regime-verdict" id="regimeVerdict">Loading data…</div>
+      <div class="regime-summary" id="regimeSummary">Pulling live indicators from the St. Louis Fed and EIA…</div>
+    </div>
+    <div class="regime-gauge">
+      <svg class="gauge-svg" viewBox="0 0 160 100" width="160" height="100">
+        <defs>
+          <linearGradient id="gaugeGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stop-color="#B84747"/>
+            <stop offset="50%" stop-color="#C9A84C"/>
+            <stop offset="100%" stop-color="#4A8E5C"/>
+          </linearGradient>
+        </defs>
+        <path d="M 15 85 A 65 65 0 0 1 145 85" fill="none" stroke="url(#gaugeGrad)" stroke-width="12" stroke-linecap="round" opacity="0.85"/>
+        <line id="gaugeNeedle" x1="80" y1="85" x2="80" y2="30" stroke="#F9F5EE" stroke-width="2.5" stroke-linecap="round" transform="rotate(-90 80 85)"/>
+        <circle cx="80" cy="85" r="5" fill="#C9A84C"/>
+      </svg>
+    </div>
+  </section>
+
+  <section class="indicators">
+
+    <!-- Oil / Inflation Card -->
+    <article class="card" id="card-oil">
+      <div class="card-header">
+        <div>
+          <span class="card-pill pill-neutral" id="pill-oil">Loading</span>
+          <h2 class="card-title">Oil &amp; Inflation Pressure</h2>
+          <div class="card-subtitle">WTI Crude · 90-day trend &amp; level</div>
+        </div>
+      </div>
+      <div class="card-value-row">
+        <div class="card-value" id="oil-value">—</div>
+        <div class="card-change" id="oil-change">—</div>
+      </div>
+      <div class="card-unit">USD per barrel · 30-day change</div>
+      <div class="chart-wrap"><canvas id="oilChart"></canvas></div>
+      <div class="threshold-row">
+        <div class="threshold">
+          <div class="threshold-label">Bullish Signal</div>
+          <div class="threshold-value"><span class="bull">↓ Below $75</span> &amp; falling</div>
+        </div>
+        <div class="threshold">
+          <div class="threshold-label">Bearish Signal</div>
+          <div class="threshold-value"><span class="bear">↑ Above $90</span> &amp; rising</div>
+        </div>
+      </div>
+    </article>
+
+    <!-- Capex Card -->
+    <article class="card" id="card-capex">
+      <div class="card-header">
+        <div>
+          <span class="card-pill pill-neutral" id="pill-capex">Loading</span>
+          <h2 class="card-title">Capex Spending</h2>
+          <div class="card-subtitle">Core Capital Goods Orders (NEWORDER)</div>
+        </div>
+      </div>
+      <div class="card-value-row">
+        <div class="card-value" id="capex-value">—</div>
+        <div class="card-change" id="capex-change">—</div>
+      </div>
+      <div class="card-unit">$ millions, monthly · 12-month % change</div>
+      <div class="chart-wrap"><canvas id="capexChart"></canvas></div>
+      <div class="threshold-row">
+        <div class="threshold">
+          <div class="threshold-label">Bullish Signal</div>
+          <div class="threshold-value"><span class="bull">↑ Positive YoY</span> &amp; rising trend</div>
+        </div>
+        <div class="threshold">
+          <div class="threshold-label">Bearish Signal</div>
+          <div class="threshold-value"><span class="bear">↓ Negative YoY</span> for 2+ months</div>
+        </div>
+      </div>
+    </article>
+
+    <!-- Jobs Card -->
+    <article class="card" id="card-jobs">
+      <div class="card-header">
+        <div>
+          <span class="card-pill pill-neutral" id="pill-jobs">Loading</span>
+          <h2 class="card-title">Labor Market</h2>
+          <div class="card-subtitle">Unemployment Rate · Sahm Rule Watch</div>
+        </div>
+      </div>
+      <div class="card-value-row">
+        <div class="card-value" id="jobs-value">—</div>
+        <div class="card-change" id="jobs-change">—</div>
+      </div>
+      <div class="card-unit">% unemployment · vs 12-month low</div>
+      <div class="chart-wrap"><canvas id="jobsChart"></canvas></div>
+      <div class="threshold-row">
+        <div class="threshold">
+          <div class="threshold-label">Bullish Signal</div>
+          <div class="threshold-value"><span class="bull">Stable</span> within 0.3pp of low</div>
+        </div>
+        <div class="threshold">
+          <div class="threshold-label">Bearish Signal</div>
+          <div class="threshold-value"><span class="bear">+0.5pp Sahm trigger</span> from 12mo low</div>
+        </div>
+      </div>
+    </article>
+
+  </section>
+
+  <section class="context-grid">
+    <div class="narrative">
+      <h3>What this dashboard tracks</h3>
+      <p>Three forward-looking indicators that historically deteriorate before equity drawdowns. The composite score weights each equally and translates the regime into a single 0–100 reading.</p>
+      <ul>
+        <li><strong>Oil price</strong> — sustained levels above ~$90/bbl tend to reignite inflation, restrict Fed easing, and pressure margins.</li>
+        <li><strong>Capex (NEWORDER)</strong> — core capital goods orders are a leading indicator of business investment; the AI capex cycle shows up here.</li>
+        <li><strong>Unemployment</strong> — the Sahm Rule (+0.5pp above 12-month low on the 3-month average) has reliably preceded recessions.</li>
+      </ul>
+    </div>
+    <div class="narrative">
+      <h3>How to read the signals</h3>
+      <p>Each indicator gets a score from 0 (bearish) to 100 (bullish) based on its level and trend versus historical thresholds. The composite is the equal-weighted average.</p>
+      <ul>
+        <li><strong>70–100 · Bull regime</strong> — fundamentals support continued upside; framework intact.</li>
+        <li><strong>40–70 · Mixed</strong> — at least one indicator deteriorating; tighten risk discipline.</li>
+        <li><strong>0–40 · Bear regime</strong> — multiple signals broken; defensive positioning warranted.</li>
+      </ul>
+      <p style="margin-top: 12px; font-size: 12px; color: var(--text-mute);">This is a regime filter, not a market timing tool. Use it to inform position sizing and risk posture, not to make all-in/all-out calls.</p>
+    </div>
+  </section>
+
+  <div class="footer">
+    DATA SOURCES · <span>FRED (Federal Reserve Bank of St. Louis)</span> · WTISPLC · DCOILWTICO · NEWORDER · UNRATE
+    <br><br>
+    Not investment advice. Indicators are illustrative of macro regime; individual portfolio decisions should incorporate full client context.
+  </div>
+
+</div>
+
+<script>
+// =========================================================================
+// FRED API access via a public CORS-friendly mirror.
+// FRED's own API requires a key and doesn't allow browser CORS, so we use
+// the stlouisfed.org "fredgraph.csv" endpoint, which serves CSV publicly.
+// =========================================================================
+
+const SERIES = {
+  oil:   { id: 'DCOILWTICO', label: 'WTI Crude (USD/bbl)', color: '#E8D5A3' },
+  capex: { id: 'NEWORDER',   label: 'Capex Orders ($M)',   color: '#6BB07D' },
+  jobs:  { id: 'UNRATE',     label: 'Unemployment Rate %', color: '#D26B6B' }
+};
+
+async function fetchFREDSeries(seriesId) {
+  // fredgraph.csv supports CORS and needs no key
+  const url = `https://fred.stlouisfed.org/graph/fredgraph.csv?id=${seriesId}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`FRED fetch failed for ${seriesId}: ${res.status}`);
+  const text = await res.text();
+  return parseFREDCsv(text);
+}
+
+function parseFREDCsv(text) {
+  const lines = text.trim().split('\n');
+  const rows = [];
+  for (let i = 1; i < lines.length; i++) {
+    const [date, valStr] = lines[i].split(',');
+    if (!date || !valStr || valStr === '.' || valStr.trim() === '') continue;
+    const val = parseFloat(valStr);
+    if (!isFinite(val)) continue;
+    rows.push({ date, value: val });
+  }
+  return rows;
+}
+
+// ---------- Scoring functions: 0 (bearish) to 100 (bullish) ----------
+
+function scoreOil(data) {
+  // Use last 90 days
+  const recent = data.slice(-90);
+  const latest = recent[recent.length - 1];
+  const monthAgo = recent[Math.max(0, recent.length - 22)];
+  const change30d = ((latest.value - monthAgo.value) / monthAgo.value) * 100;
+
+  let levelScore;
+  // $60 or below = 100, $100+ = 0, linear between
+  if (latest.value <= 60) levelScore = 100;
+  else if (latest.value >= 100) levelScore = 0;
+  else levelScore = 100 - ((latest.value - 60) / 40) * 100;
+
+  // Trend penalty/bonus
+  let trendAdj = 0;
+  if (change30d > 10) trendAdj = -15;
+  else if (change30d > 5) trendAdj = -8;
+  else if (change30d < -5) trendAdj = +8;
+
+  const score = Math.max(0, Math.min(100, levelScore + trendAdj));
+  return { score, latest: latest.value, change: change30d, recent };
+}
+
+function scoreCapex(data) {
+  // Monthly data; use last 24 months for chart, latest value, 12mo YoY change
+  const recent = data.slice(-24);
+  const latest = recent[recent.length - 1];
+  const yearAgo = recent[Math.max(0, recent.length - 13)];
+  const yoy = ((latest.value - yearAgo.value) / yearAgo.value) * 100;
+
+  // Score: YoY <-5% = 0; YoY >+10% = 100; linear between
+  let score;
+  if (yoy <= -5) score = 0;
+  else if (yoy >= 10) score = 100;
+  else score = ((yoy + 5) / 15) * 100;
+
+  // Check 3-month trend
+  const recent3 = recent.slice(-3).map(r => r.value);
+  const trending_up = recent3[2] > recent3[0];
+  if (trending_up && score < 100) score = Math.min(100, score + 5);
+  if (!trending_up && score > 0) score = Math.max(0, score - 5);
+
+  return { score, latest: latest.value, change: yoy, recent };
+}
+
+function scoreJobs(data) {
+  // Monthly. Compute 12-month rolling low, Sahm Rule check.
+  // Use last 24 months for chart.
+  const recent = data.slice(-24);
+  const latest = recent[recent.length - 1];
+
+  // 12-month low of UNRATE
+  const last12 = recent.slice(-12).map(r => r.value);
+  const min12 = Math.min(...last12);
+  const deltaFromLow = latest.value - min12;
+
+  // 3-month average of unemployment
+  const last3 = recent.slice(-3).map(r => r.value);
+  const avg3 = last3.reduce((a, b) => a + b, 0) / 3;
+  const sahmDelta = avg3 - min12; // >0.5 = Sahm trigger
+
+  // Score: at low = 100; +0.5pp above low = 30; +1.0pp above low = 0
+  let score;
+  if (deltaFromLow <= 0) score = 100;
+  else if (deltaFromLow >= 1.0) score = 0;
+  else score = 100 - (deltaFromLow / 1.0) * 100;
+
+  return {
+    score,
+    latest: latest.value,
+    change: deltaFromLow,
+    sahmDelta,
+    sahmTriggered: sahmDelta >= 0.5,
+    recent
+  };
+}
+
+// ---------- Chart rendering ----------
+
+let charts = {};
+
+function makeChart(canvasId, data, color, formatY) {
+  if (charts[canvasId]) charts[canvasId].destroy();
+  const ctx = document.getElementById(canvasId).getContext('2d');
+  const labels = data.map(d => d.date);
+  const values = data.map(d => d.value);
+
+  charts[canvasId] = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        data: values,
+        borderColor: color,
+        backgroundColor: color + '22',
+        borderWidth: 2,
+        fill: true,
+        tension: 0.25,
+        pointRadius: 0,
+        pointHoverRadius: 4,
+        pointHoverBackgroundColor: color
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: '#131F2A',
+          borderColor: '#C9A84C',
+          borderWidth: 1,
+          titleColor: '#C9A84C',
+          bodyColor: '#F9F5EE',
+          titleFont: { family: 'JetBrains Mono', size: 10 },
+          bodyFont: { family: 'JetBrains Mono', size: 11 },
+          padding: 10,
+          displayColors: false,
+          callbacks: {
+            label: (ctx) => formatY ? formatY(ctx.parsed.y) : ctx.parsed.y.toFixed(2)
+          }
+        }
+      },
+      scales: {
+        x: {
+          display: false,
+          grid: { display: false }
+        },
+        y: {
+          display: true,
+          position: 'right',
+          grid: { color: 'rgba(201,168,76,0.08)' },
+          ticks: {
+            color: '#8A9AA8',
+            font: { family: 'JetBrains Mono', size: 9 },
+            maxTicksLimit: 4,
+            callback: (v) => formatY ? formatY(v) : v
+          }
+        }
+      }
+    }
+  });
+}
+
+// ---------- UI updates ----------
+
+function setPill(id, score) {
+  const el = document.getElementById(id);
+  el.classList.remove('pill-bull', 'pill-neutral', 'pill-bear');
+  if (score >= 70) { el.classList.add('pill-bull'); el.textContent = 'Bullish'; }
+  else if (score >= 40) { el.classList.add('pill-neutral'); el.textContent = 'Mixed'; }
+  else { el.classList.add('pill-bear'); el.textContent = 'Bearish'; }
+}
+
+function fmtMoney(n) { return '$' + n.toFixed(2); }
+function fmtPct(n) { return n.toFixed(2) + '%'; }
+function fmtPctSigned(n) { return (n >= 0 ? '+' : '') + n.toFixed(2) + '%'; }
+function fmtMillions(n) { return '$' + (n / 1000).toFixed(1) + 'B'; }
+function fmtBP(n) { return (n >= 0 ? '+' : '') + (n * 100).toFixed(0) + 'bp'; }
+
+function updateRegimeBanner(scores, jobsResult) {
+  const composite = (scores.oil + scores.capex + scores.jobs) / 3;
+  document.getElementById('compositeScore').textContent = composite.toFixed(0);
+
+  // Gauge needle: -90deg = 0, +90deg = 100, linear
+  const needleAngle = -90 + (composite / 100) * 180;
+  const needle = document.getElementById('gaugeNeedle');
+  needle.setAttribute('transform', `rotate(${needleAngle} 80 85)`);
+
+  const verdictEl = document.getElementById('regimeVerdict');
+  const summaryEl = document.getElementById('regimeSummary');
+  verdictEl.classList.remove('bull', 'neutral', 'bear');
+
+  let label, summary;
+  if (composite >= 70) {
+    verdictEl.classList.add('bull');
+    label = 'Bull Regime · Framework Intact';
+    summary = 'All three indicators are confirming the bull thesis. Oil contained, capex investment positive, labor market stable. Conditions favor continued risk-on positioning.';
+  } else if (composite >= 40) {
+    verdictEl.classList.add('neutral');
+    label = 'Mixed Regime · Watch Carefully';
+    const flags = [];
+    if (scores.oil < 50) flags.push('oil/inflation pressure');
+    if (scores.capex < 50) flags.push('capex softening');
+    if (scores.jobs < 50) flags.push('labor weakening');
+    summary = `At least one pillar is deteriorating${flags.length ? ': ' + flags.join(', ') : ''}. Maintain core positioning but tighten risk discipline and review hedges.`;
+  } else {
+    verdictEl.classList.add('bear');
+    label = 'Bear Regime · Defensive Posture';
+    summary = 'Multiple indicators are breaking down. The macro setup that supported the bull thesis is weakening. Consider raising cash, reducing beta, and emphasizing quality.';
+  }
+  if (jobsResult.sahmTriggered) {
+    summary += ' ⚠️ Sahm Rule has triggered — historically reliable recession signal.';
+  }
+  verdictEl.textContent = label;
+  summaryEl.textContent = summary;
+}
+
+async function loadAll() {
+  const errBanner = document.getElementById('errorBanner');
+  errBanner.classList.remove('show');
+  document.getElementById('dataStamp').textContent = 'Fetching…';
+
+  try {
+    const [oilData, capexData, jobsData] = await Promise.all([
+      fetchFREDSeries(SERIES.oil.id),
+      fetchFREDSeries(SERIES.capex.id),
+      fetchFREDSeries(SERIES.jobs.id)
+    ]);
+
+    // ===== OIL =====
+    const oilR = scoreOil(oilData);
+    document.getElementById('oil-value').textContent = fmtMoney(oilR.latest);
+    const oilChange = document.getElementById('oil-change');
+    oilChange.textContent = fmtPctSigned(oilR.change) + ' · 30d';
+    oilChange.className = 'card-change ' + (oilR.change >= 0 ? 'change-down' : 'change-up');
+    // For oil, RISING price is bearish, so up = red
+    setPill('pill-oil', oilR.score);
+    makeChart('oilChart', oilR.recent, SERIES.oil.color, fmtMoney);
+
+    // ===== CAPEX =====
+    const capexR = scoreCapex(capexData);
+    document.getElementById('capex-value').textContent = fmtMillions(capexR.latest);
+    const capexChange = document.getElementById('capex-change');
+    capexChange.textContent = fmtPctSigned(capexR.change) + ' · YoY';
+    capexChange.className = 'card-change ' + (capexR.change >= 0 ? 'change-up' : 'change-down');
+    setPill('pill-capex', capexR.score);
+    makeChart('capexChart', capexR.recent, SERIES.capex.color, (v) => '$' + (v/1000).toFixed(0) + 'B');
+
+    // ===== JOBS =====
+    const jobsR = scoreJobs(jobsData);
+    document.getElementById('jobs-value').textContent = fmtPct(jobsR.latest);
+    const jobsChange = document.getElementById('jobs-change');
+    jobsChange.textContent = (jobsR.change >= 0 ? '+' : '') + (jobsR.change * 100).toFixed(0) + 'bp · vs 12mo low';
+    jobsChange.className = 'card-change ' + (jobsR.change <= 0.2 ? 'change-up' : 'change-down');
+    setPill('pill-jobs', jobsR.score);
+    makeChart('jobsChart', jobsR.recent, SERIES.jobs.color, fmtPct);
+
+    // ===== Composite =====
+    updateRegimeBanner({
+      oil: oilR.score,
+      capex: capexR.score,
+      jobs: jobsR.score
+    }, jobsR);
+
+    // Latest data date stamp
+    const latestDate = oilData[oilData.length - 1].date;
+    document.getElementById('dataStamp').textContent = `As of ${latestDate}`;
+
+  } catch (err) {
+    console.error(err);
+    errBanner.textContent = `Couldn't load live data: ${err.message}. The FRED endpoint may be blocked by your network or browser. Try opening this file in a regular browser tab.`;
+    errBanner.classList.add('show');
+    document.getElementById('dataStamp').textContent = 'Data unavailable';
+  }
+}
+
+window.addEventListener('DOMContentLoaded', loadAll);
+</script>
+</body>
+</html>
