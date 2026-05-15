@@ -547,7 +547,7 @@ const SERIES = {
 
 async function fetchFREDSeries(seriesId) {
   // fredgraph.csv supports CORS and needs no key
-  const url = `https://fred.stlouisfed.org/graph/fredgraph.csv?id=${seriesId}`;
+  const url = `/fred-proxy?id=${seriesId}`;
   const res = await fetch(url);
   if (!res.ok) throw new Error(`FRED fetch failed for ${seriesId}: ${res.status}`);
   const text = await res.text();
