@@ -2321,38 +2321,43 @@ function sortAccount(ai, col) {
 //   "Sample — Robert & Linda Matthews"   -> "Robert & Linda Matthews's Portfolio"
 //   ""  / null  / "Client Portfolio"     -> "Client Portfolio"
 function formatPortfolioTitle(raw) {
-  if (!raw) return 'Client Portfolio';
+  if (!raw) return 'Investment Portfolio';
   let s = String(raw).trim();
-  if (!s || /^client portfolio$/i.test(s)) return 'Client Portfolio';
+  if (!s || /^client portfolio$/i.test(s)) return 'Investment Portfolio';
 
   // Already in "Name's Portfolio" / "Names' Portfolio" form — leave it.
-  if (/['’]\s*s?\s+portfolio$/i.test(s)) return s;
+  if (/['']\s*s?\s+portfolio$/i.test(s)) return s;
 
-  // Strip leading "Sample —" / "Demo —" / "Example —" prefixes (used in sample data)
-  s = s.replace(/^(sample|demo|example|test)\s*[-–—:]\s*/i, '').trim();
+  // Strip leading "Sample —" / "Demo —" / "Example —" / "SWM —" prefixes
+  s = s.replace(/^(sample|demo|example|test|swm)\s*[-–—:]\s*/i, '').trim();
 
-  // If a dash is present, take the LEFT side (the client name) and discard the
-  // right side (typically suffix junk like "SWM Portfolio", "LPL Account").
-  // This runs after the prefix strip so leading "Sample —" doesn't eat the name.
-  if (/\s+[-–—]\s+/.test(s)) {
-    s = s.split(/\s+[-–—]\s+/)[0].trim();
+  // If a dash is present, extract the CLIENT NAME from whichever side isn't junk.
+  // Junk side = contains only internal abbreviations like SWM, LPL, or generic words.
+  const JUNK_ONLY = /^(swm|lpl|ria|aum|rep|csa|fee|sma|ums|uap|sima|advisor|advisory|account|portfolio|brokerage|investments?|holdings?|assets?|managed|management|model|platform)[\s\w]*$/i;
+  const dashMatch = s.match(/^(.+?)\s*[-–—]\s*(.+)$/);
+  if (dashMatch) {
+    const left  = dashMatch[1].trim();
+    const right = dashMatch[2].trim();
+    // If left side is junk (e.g. "SWM Portfolio"), use right side as name
+    if (JUNK_ONLY.test(left))       s = right;
+    // If right side is junk (e.g. "LPL Account"), use left side as name
+    else if (JUNK_ONLY.test(right)) s = left;
+    // Both look like names — default to left (client name usually comes first)
+    else                            s = left;
   }
 
-  // Strip trailing generic suffix words ("Portfolio", "Account", "Brokerage", etc.)
-  // Repeat in case multiple stack up (e.g. "Freda Account Portfolio")
-  const trailingJunk = /\s+(portfolio|portfolios|account|accounts|brokerage|investments?|holdings|assets|ira|roth|advisory|swm|lpl)$/i;
+  // Strip trailing generic suffix words (may stack, e.g. "Account Portfolio")
+  const trailingJunk = /\s+(portfolio|portfolios|account|accounts|brokerage|investments?|holdings?|assets?|ira|roth|advisory|swm|lpl|managed|management|platform|rep|model)$/i;
   while (trailingJunk.test(s)) s = s.replace(trailingJunk, '').trim();
 
-  if (!s) return 'Client Portfolio';
+  if (!s) return 'Investment Portfolio';
 
-  // Family Trust / Trust / LLC / Foundation — don't add possessive, just append "Portfolio"
+  // Family Trust / Trust / LLC / Foundation — no possessive, just append "Portfolio"
   if (/\b(trust|llc|foundation|estate|fund)\b/i.test(s)) {
     return s + ' Portfolio';
   }
 
-  // Always use 's possessive — grammatically correct for all singular names per
-  // modern style guides (AP, Chicago). Reads naturally for "Charles's", "Liz's",
-  // "Matthews's" alike.
+  // Always use 's possessive
   return s + "'s Portfolio";
 }
 
