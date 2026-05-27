@@ -2375,22 +2375,6 @@ function formatPortfolioTitle(raw) {
   // Single name — standard possessive
   return s + "'s Portfolio";
 }
-  }
-
-  // Strip trailing generic suffix words (may stack, e.g. "Account Portfolio")
-  const trailingJunk = /\s+(portfolio|portfolios|account|accounts|brokerage|investments?|holdings?|assets?|ira|roth|advisory|swm|lpl|managed|management|platform|rep|model)$/i;
-  while (trailingJunk.test(s)) s = s.replace(trailingJunk, '').trim();
-
-  if (!s) return 'Investment Portfolio';
-
-  // Family Trust / Trust / LLC / Foundation — no possessive, just append "Portfolio"
-  if (/\b(trust|llc|foundation|estate|fund)\b/i.test(s)) {
-    return s + ' Portfolio';
-  }
-
-  // Always use 's possessive
-  return s + "'s Portfolio";
-}
 
 function renderPortfolio(data) {
   // Normalise: support both old {holdings:[]} and new {accounts:[]} shapes
