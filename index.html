@@ -1986,7 +1986,23 @@ async function analyzePortfolio() {
     Object.assign(knownScoresObj, anchors);
     const knownScoresJSON = JSON.stringify(knownScoresObj);
 
-    const prompt = buildPortfolioPrompt(knownScoresJSON);
+    // Pre-extract client first name(s) from account labels (e.g. "Carol - SWM IRA")
+    let clientNameHint = '';
+    try {
+      const flatText = fileContent.map(b => b.text || '').join(' ');
+      if (flatText) {
+        const nameMatches = [...flatText.matchAll(/\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s*[-–—]\s*SWM\b/g)];
+        const uniqueNames = [...new Set(nameMatches.map(m => m[1].trim()))];
+        if (uniqueNames.length === 1) {
+          clientNameHint = `The client's name is "${uniqueNames[0]}". Use "${uniqueNames[0]}'s Portfolio" as the portfolio_name. `;
+        } else if (uniqueNames.length >= 2) {
+          const joined = uniqueNames.slice(0, 2).join(' & ');
+          clientNameHint = `The clients are ${uniqueNames.join(' and ')}. Use "${joined}'s Portfolio" as the portfolio_name. `;
+        }
+      }
+    } catch(e) {}
+
+    const prompt = buildPortfolioPrompt(knownScoresJSON, clientNameHint);
 
     // ── Step 3: API call with automatic retry on truncation ──
     document.getElementById('az-status-sub').textContent = 'Analyzing holdings…';
@@ -2109,8 +2125,10 @@ async function analyzePortfolio() {
 
 // Build the portfolio extraction prompt dynamically — embeds known scores so AI
 // can resolve them instantly without web searches, only searching unknowns.
-function buildPortfolioPrompt(knownScoresJSON) {
+function buildPortfolioPrompt(knownScoresJSON, clientNameHint = '') {
   return `You are a financial risk analyst. Extract every holding from this portfolio document and assign each a Nitrogen (Riskalyze) 0-100 risk score.
+
+${clientNameHint}For the portfolio_name: use the real client name only — never use "SWM", "LPL", account numbers, or generic terms like "Client Portfolio".
 
 KNOWN RISK SCORES (use these directly — do NOT web search these tickers):
 ${knownScoresJSON}
@@ -2323,27 +2341,40 @@ function sortAccount(ai, col) {
 function formatPortfolioTitle(raw) {
   if (!raw) return 'Investment Portfolio';
   let s = String(raw).trim();
-  if (!s || /^client portfolio$/i.test(s)) return 'Investment Portfolio';
+  if (!s || /^(client portfolio|investment portfolio)$/i.test(s)) return 'Investment Portfolio';
 
-  // Already in "Name's Portfolio" / "Names' Portfolio" form — leave it.
+  // Already clean — "Name's Portfolio" form
   if (/['']\s*s?\s+portfolio$/i.test(s)) return s;
 
-  // Strip leading "Sample —" / "Demo —" / "Example —" / "SWM —" prefixes
-  s = s.replace(/^(sample|demo|example|test|swm)\s*[-–—:]\s*/i, '').trim();
+  // Strip leading junk prefixes like "SWM —", "Sample —", "Demo —"
+  s = s.replace(/^(sample|demo|example|test|swm|lpl)\s*[-–—:]\s*/i, '').trim();
 
-  // If a dash is present, extract the CLIENT NAME from whichever side isn't junk.
-  // Junk side = contains only internal abbreviations like SWM, LPL, or generic words.
-  const JUNK_ONLY = /^(swm|lpl|ria|aum|rep|csa|fee|sma|ums|uap|sima|advisor|advisory|account|portfolio|brokerage|investments?|holdings?|assets?|managed|management|model|platform)[\s\w]*$/i;
+  // If a dash is present, figure out which side is the real client name
+  const JUNK = /^(swm|lpl|ria|sma|tod|ira|roth|brokerage|account|portfolio|investments?|holdings?|assets?|managed|advisory|platform|model)[\s\w\(\)]*$/i;
   const dashMatch = s.match(/^(.+?)\s*[-–—]\s*(.+)$/);
   if (dashMatch) {
     const left  = dashMatch[1].trim();
     const right = dashMatch[2].trim();
-    // If left side is junk (e.g. "SWM Portfolio"), use right side as name
-    if (JUNK_ONLY.test(left))       s = right;
-    // If right side is junk (e.g. "LPL Account"), use left side as name
-    else if (JUNK_ONLY.test(right)) s = left;
-    // Both look like names — default to left (client name usually comes first)
-    else                            s = left;
+    if (JUNK.test(left))       s = right;
+    else if (JUNK.test(right)) s = left;
+    else                       s = left;
+  }
+
+  // Strip trailing junk words (repeat in case they stack)
+  const trailingJunk = /\s+(portfolio|portfolios|account|accounts|brokerage|investments?|holdings?|assets?|ira|roth|tod|advisory|swm|lpl|managed|management|platform|model)$/i;
+  while (trailingJunk.test(s)) s = s.replace(trailingJunk, '').trim();
+
+  if (!s) return 'Investment Portfolio';
+
+  // Trust / LLC / Foundation — no possessive
+  if (/\b(trust|llc|foundation|estate|fund)\b/i.test(s)) return s + ' Portfolio';
+
+  // Couple joined with & or and
+  if (/\s+(&|and)\s+/i.test(s)) return s + "'s Portfolio";
+
+  // Single name — standard possessive
+  return s + "'s Portfolio";
+}
   }
 
   // Strip trailing generic suffix words (may stack, e.g. "Account Portfolio")
