@@ -344,6 +344,12 @@ body{font-family:'Nunito Sans',sans-serif;background:var(--cream);color:var(--te
 .risk-bar-bg{height:5px;background:#eef0f4;border-radius:3px;}
 .risk-bar-fill{height:5px;border-radius:3px;transition:width .6s ease;}
 .risk-num{font-family:'Playfair Display',serif;font-size:.95rem;font-weight:700;}
+.risk-num-edit{cursor:pointer;border-bottom:1px dashed transparent;padding-bottom:1px;transition:border-color .15s,background .15s;border-radius:3px;padding:1px 4px;}
+.risk-num-edit:hover{background:rgba(201,168,76,.12);}
+.risk-num-edit::after{content:" ✎";font-size:.55rem;color:var(--slate-lt);opacity:0;transition:opacity .15s;font-family:'Nunito Sans',sans-serif;font-weight:400;}
+.risk-num-edit:hover::after{opacity:.7;}
+.risk-num-override::before{content:"✎ ";font-size:.6rem;color:var(--gold);font-family:'Nunito Sans',sans-serif;font-weight:400;}
+.risk-num-override{background:rgba(201,168,76,.08);}
 .risk-badge{font-size:.6rem;font-weight:700;padding:3px 8px;border-radius:5px;white-space:nowrap;}
 
 /* Cash input */
@@ -2141,7 +2147,7 @@ QQQ=85 (NASDAQ 100), IWM=87 (Russell 2000)
 AGG=28, BND=25 (Core Bonds), TLT=35 (Long Treasury), SHY=15 (Short Treasury)
 HYG=48, JNK=50 (High Yield), LQD=32 (IG Corp)
 GLD=65 (Gold), VNQ=76 (REITs), EEM=82 (Emerging Mkts)
-IBIT=95 (Bitcoin ETF), Money market/cash=5, Structured note=30, Annuity=5 (ALL annuities: fixed, fixed-indexed, structured, RILA, MYGA, variable, point-to-point — always 5)
+IBIT=95 (Bitcoin ETF), Money market/cash=5, Structured note=30, Variable annuity=50 (variable subaccounts have real market exposure), Other annuities=5 (fixed, fixed-indexed, RILA, MYGA, structured annuity, point-to-point — always 5)
 Balanced 60/40 fund~55, Large cap blend~74, Small cap~85-88
 Investment grade short bond~18-22
 
@@ -2315,7 +2321,7 @@ function sortAccount(ai, col) {
   // Store the sorted holdings order and re-render tbody
   _sortState[key]._sorted = sorted;
   const tbody = document.getElementById(key + '-tbody');
-  if (tbody) tbody.innerHTML = sorted.map(h => renderHoldingRow(h)).join('');
+  if (tbody) tbody.innerHTML = sorted.map(h => renderHoldingRow(h, ai, acct.holdings.indexOf(h))).join('');
 
   // Update header arrows and active class
   const thead = document.getElementById(key + '-thead');
@@ -2516,7 +2522,7 @@ function renderPortfolio(data) {
 
 function renderAccountBlock(acct, ai) {
   const id = 'acct-' + ai;
-  const holdingsHtml = (acct.holdings || []).map(h => renderHoldingRow(h)).join('');
+  const holdingsHtml = (acct.holdings || []).map((h, hi) => renderHoldingRow(h, ai, hi)).join('');
   return `
     <div class="holdings-card" id="${id}" style="margin-bottom:20px">
       <div class="hc-head">
@@ -2559,12 +2565,18 @@ function renderAccountBlock(acct, ai) {
     </div>`;
 }
 
-function renderHoldingRow(h) {
+function renderHoldingRow(h, ai, hi) {
   const s = parseFloat(h.risk_score) || 50;
   const col = s<=25?'#2563a8':s<=40?'#22a06b':s<=60?'#6b7e96':s<=75?'#d4820a':'#c0392b';
   const badgeBg = s<=25?'#e8f0fa':s<=40?'#e6f4ed':s<=60?'#eef0f4':s<=75?'#fff3e0':'#fde8e8';
   const mv = h.market_value ? '$' + parseFloat(h.market_value).toLocaleString('en-US',{maximumFractionDigits:0}) : '—';
   const alloc = h.allocation_pct ? parseFloat(h.allocation_pct).toFixed(1)+'%' : '—';
+  // Manual override styling — small ✎ prefix marks scores the advisor edited
+  const overrideCls = h._manualOverride ? ' risk-num-override' : '';
+  const editable = (ai !== undefined && hi !== undefined);
+  const editAttrs = editable
+    ? ` class="risk-num risk-num-edit${overrideCls}" title="Click to edit risk score" onclick="openRiskEdit(${ai},${hi},event)"`
+    : ` class="risk-num${overrideCls}"`;
   return `<tr>
     <td><span class="ticker-badge">${h.ticker || '—'}</span></td>
     <td style="font-weight:600;font-size:.79rem">${h.name || '—'}</td>
@@ -2574,9 +2586,38 @@ function renderHoldingRow(h) {
       <div class="risk-bar-wrap"><div class="risk-bar-bg"><div class="risk-bar-fill" style="width:${alloc!=='—'?alloc:'0'};background:${col}"></div></div></div>
       <div style="font-size:.68rem;color:#6b7e96">${alloc}</div>
     </td>
-    <td style="text-align:center"><span class="risk-num" style="color:${col}">${Math.round(s)}</span></td>
+    <td style="text-align:center"><span${editAttrs} style="color:${col}">${Math.round(s)}</span></td>
     <td><span class="risk-badge" style="background:${badgeBg};color:${col}">● ${riskLevelLabel(s)}</span></td>
   </tr>`;
+}
+
+// ── Manual risk score override ──
+// Opens a prompt to edit any holding's risk score. Marks the holding as
+// manually overridden so the ✎ indicator appears, then recalcs the rollup.
+function openRiskEdit(ai, hi, event) {
+  if (event) event.stopPropagation();
+  const acct = _portfolioAccounts[ai];
+  if (!acct || !acct.holdings || !acct.holdings[hi]) return;
+  const h = acct.holdings[hi];
+  const current = Math.round(parseFloat(h.risk_score) || 50);
+  const label = h.ticker || h.name || 'this holding';
+  const input = prompt(
+    `Edit risk score for ${label}\n` +
+    (h.type ? `Type: ${h.type}\n` : '') +
+    `\nEnter a value between 0 and 100 (current: ${current}):`,
+    current
+  );
+  if (input === null) return;
+  const trimmed = String(input).trim();
+  if (trimmed === '') return;
+  const newScore = parseInt(trimmed, 10);
+  if (isNaN(newScore) || newScore < 0 || newScore > 100) {
+    alert('Please enter a whole number between 0 and 100.');
+    return;
+  }
+  h.risk_score = newScore;
+  h._manualOverride = true;
+  recalcPortfolio();
 }
 
 function updateAccountCash(ai, val) {
@@ -2607,7 +2648,7 @@ function recalcPortfolio() {
         if (col === 'alloc')  return dir * ((parseFloat(a.allocation_pct)||0) - (parseFloat(b.allocation_pct)||0));
         return dir * (a[col]||'').toString().toLowerCase().localeCompare((b[col]||'').toString().toLowerCase());
       });
-      tbody.innerHTML = resorted.map(h => renderHoldingRow(h)).join('');
+      tbody.innerHTML = resorted.map(h => renderHoldingRow(h, ai, holdings.indexOf(h))).join('');
     }
 
     // ── Calculate account totals ──
@@ -2795,7 +2836,7 @@ ${knownLines ? 'PRE-VERIFIED SCORES (use exactly): ' + knownLines + '\n' : ''}
 HOLDINGS TO SCORE:
 ${holdingsList}
 
-Calibration: SPY=74, QQQ=85, AGG=28, TLT=35, HYG=48, GLD=65, EEM=82, IBIT=95, Money market/cash=5, Annuity=5, Structured note=30, Bond=20, CD=5
+Calibration: SPY=74, QQQ=85, AGG=28, TLT=35, HYG=48, GLD=65, EEM=82, IBIT=95, Money market/cash=5, Variable annuity=50, Other annuities=5, Structured note=30, Bond=20, CD=5
 
 Return ONLY valid JSON array, no markdown:
 [{"ticker":"","name":"","type":"","risk_score":0}]
@@ -4399,8 +4440,21 @@ function classifyHolding(h) {
     type.includes('cash') || type.includes('savings')
   ) return { score:5, type:'Cash / Money Market' };
 
+  // ── VARIABLE ANNUITIES → score: 50 ──
+  // Variable annuities have real market exposure through subaccounts; treated as moderate risk.
+  // Checked BEFORE the generic annuity catch so variable VAs don't fall through to score 5.
+  const isVariableAnnuity =
+    combined.includes("variable annuity") || combined.includes("variable annuities") ||
+    combined.includes("var annuity") ||
+    type.includes("variable annuity") || type.includes("variable insurance") ||
+    // "variable" + "annuity" anywhere in name (handles "ABC Variable XYZ Annuity")
+    (combined.includes("variable") && (combined.includes("annuity") || combined.includes("annuit"))) ||
+    // VA subaccounts
+    combined.includes("subaccount") || combined.includes("sub-account") || combined.includes("sub account");
+  if (isVariableAnnuity) return { score: 50, type: "Variable Annuity" };
+
   // ── ANNUITIES → score: 5 ──
-  // Fixed, fixed-indexed, variable, MYGA, structured annuities — all insurance products
+  // Fixed, fixed-indexed, MYGA, structured annuities — all insurance products
   // Checked BEFORE structured notes — a "structured annuity" is still an annuity
   const isAnnuity =
     combined.includes("annuity") || combined.includes("annuitie") ||
