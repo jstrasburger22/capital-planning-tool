@@ -350,6 +350,20 @@ body{font-family:'Nunito Sans',sans-serif;background:var(--cream);color:var(--te
 .risk-num-edit:hover::after{opacity:.7;}
 .risk-num-override::before{content:"✎ ";font-size:.6rem;color:var(--gold);font-family:'Nunito Sans',sans-serif;font-weight:400;}
 .risk-num-override{background:rgba(201,168,76,.08);}
+
+/* Row action buttons (edit / delete) on each holding row */
+.row-act-btn{background:transparent;border:1px solid var(--border);color:var(--slate);border-radius:5px;padding:3px 7px;cursor:pointer;font-size:.78rem;line-height:1;font-family:'Nunito Sans',sans-serif;font-weight:600;transition:all .15s;margin:0 2px;}
+.row-act-btn:hover{border-color:var(--gold);color:var(--gold);background:rgba(201,168,76,.08);}
+.row-act-del:hover{border-color:#c0392b;color:#c0392b;background:rgba(192,57,43,.08);}
+
+/* Delete account button — small ✕ in account header */
+.acct-del-btn{background:transparent;border:1px solid var(--border);color:var(--slate-lt);border-radius:6px;padding:5px 9px;cursor:pointer;font-size:.72rem;line-height:1;font-family:'Nunito Sans',sans-serif;font-weight:700;transition:all .15s;}
+.acct-del-btn:hover{border-color:#c0392b;color:#c0392b;background:rgba(192,57,43,.06);}
+
+/* Holding-edit modal field grid */
+.he-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px 16px;margin-bottom:8px;}
+.he-grid .he-full{grid-column:1/-1;}
+.he-note{font-size:.65rem;color:var(--slate-lt);margin-top:-4px;margin-bottom:8px;}
 .risk-badge{font-size:.6rem;font-weight:700;padding:3px 8px;border-radius:5px;white-space:nowrap;}
 
 /* Cash input */
@@ -2540,6 +2554,7 @@ function renderAccountBlock(acct, ai) {
             <div id="${id}-score" style="font-size:1.4rem;font-weight:700;color:var(--navy)">—</div>
             <div id="${id}-level" style="font-size:.65rem;color:var(--slate)">—</div>
           </div>
+          <button class="acct-del-btn" title="Remove this account" onclick="deleteAccount(${ai},event)">✕ Remove</button>
         </div>
       </div>
       <table class="htable">
@@ -2551,6 +2566,7 @@ function renderAccountBlock(acct, ai) {
           <th data-sort="alloc" onclick="sortAccount(${ai},'alloc')" style="text-align:center;cursor:pointer;user-select:none;white-space:nowrap">Alloc<span class="sort-arrow"> ⇅</span></th>
           <th data-sort="risk" onclick="sortAccount(${ai},'risk')" style="text-align:center;cursor:pointer;user-select:none;white-space:nowrap">Risk<span class="sort-arrow"> ⇅</span></th>
           <th>Level</th>
+          <th style="text-align:center;font-size:.55rem;color:var(--slate-lt)">Actions</th>
         </tr></thead>
         <tbody id="${id}-tbody">${holdingsHtml}</tbody>
       </table>
@@ -2588,6 +2604,10 @@ function renderHoldingRow(h, ai, hi) {
     </td>
     <td style="text-align:center"><span${editAttrs} style="color:${col}">${Math.round(s)}</span></td>
     <td><span class="risk-badge" style="background:${badgeBg};color:${col}">● ${riskLevelLabel(s)}</span></td>
+    ${editable ? `<td style="text-align:center;white-space:nowrap;padding:4px 6px">
+      <button class="row-act-btn" title="Edit holding" onclick="openHoldingEdit(${ai},${hi},event)">✎</button>
+      <button class="row-act-btn row-act-del" title="Delete holding" onclick="deleteHolding(${ai},${hi},event)">✕</button>
+    </td>` : ''}
   </tr>`;
 }
 
@@ -2617,6 +2637,124 @@ function openRiskEdit(ai, hi, event) {
   }
   h.risk_score = newScore;
   h._manualOverride = true;
+  recalcPortfolio();
+}
+
+// ── Re-render the entire accounts wrap from the current _portfolioAccounts state ──
+// Needed after any add/edit/delete that changes account or holding indices.
+function rerenderAccounts() {
+  const wrap = document.getElementById('az-accounts-wrap');
+  if (!wrap) return;
+  wrap.innerHTML = _portfolioAccounts.map((acct, ai) => renderAccountBlock(acct, ai)).join('');
+  // Restore the cash-added input values for each account
+  _portfolioAccounts.forEach((acct, ai) => {
+    const cashInput = document.getElementById('acct-' + ai + '-cash-input');
+    if (cashInput && acct.cash_added) cashInput.value = acct.cash_added;
+  });
+}
+
+// ── Delete a holding from an account ──
+function deleteHolding(ai, hi, event) {
+  if (event) event.stopPropagation();
+  const acct = _portfolioAccounts[ai];
+  if (!acct || !acct.holdings || !acct.holdings[hi]) return;
+  const h = acct.holdings[hi];
+  const label = h.ticker || h.name || 'this holding';
+  if (!confirm(`Remove ${label} from ${acct.account_name || 'this account'}?`)) return;
+  acct.holdings.splice(hi, 1);
+  // Recalc allocation percentages for the remaining holdings in this account
+  const totalMv = acct.holdings.reduce((s, x) => s + (parseFloat(x.market_value) || 0), 0);
+  if (totalMv > 0) {
+    acct.holdings.forEach(x => { x.allocation_pct = (parseFloat(x.market_value) || 0) / totalMv * 100; });
+  }
+  // Clear sort state for this account since indices have shifted
+  delete _sortState['acct-' + ai];
+  rerenderAccounts();
+  recalcPortfolio();
+}
+
+// ── Delete an entire account from the portfolio ──
+function deleteAccount(ai, event) {
+  if (event) event.stopPropagation();
+  const acct = _portfolioAccounts[ai];
+  if (!acct) return;
+  const name = acct.account_name || `Account ${ai+1}`;
+  const count = (acct.holdings || []).length;
+  const msg = count > 0
+    ? `Remove ${name}?\n\nThis will delete ${count} holding${count===1?'':'s'} from the portfolio.`
+    : `Remove ${name}?`;
+  if (!confirm(msg)) return;
+  _portfolioAccounts.splice(ai, 1);
+  // Sort state keys reference old indices — reset everything to be safe
+  _sortState = {};
+  rerenderAccounts();
+  recalcPortfolio();
+}
+
+// ── Open holding edit modal pre-filled with current values ──
+let _heContext = null;
+function openHoldingEdit(ai, hi, event) {
+  if (event) event.stopPropagation();
+  const acct = _portfolioAccounts[ai];
+  if (!acct || !acct.holdings || !acct.holdings[hi]) return;
+  const h = acct.holdings[hi];
+  _heContext = { ai, hi };
+  document.getElementById('he-ticker').value = h.ticker || '';
+  document.getElementById('he-name').value = h.name || '';
+  document.getElementById('he-type').value = h.type || '';
+  document.getElementById('he-mv').value = h.market_value || '';
+  document.getElementById('he-risk').value = Math.round(parseFloat(h.risk_score) || 50);
+  const ovEl = document.getElementById('he-override-note');
+  if (ovEl) ovEl.style.display = h._manualOverride ? 'block' : 'none';
+  document.getElementById('he-overlay').style.display = 'flex';
+}
+
+function closeHoldingEdit() {
+  document.getElementById('he-overlay').style.display = 'none';
+  _heContext = null;
+}
+
+function saveHoldingEdit() {
+  if (!_heContext) { closeHoldingEdit(); return; }
+  const { ai, hi } = _heContext;
+  const acct = _portfolioAccounts[ai];
+  if (!acct || !acct.holdings || !acct.holdings[hi]) { closeHoldingEdit(); return; }
+  const h = acct.holdings[hi];
+
+  const newTicker = document.getElementById('he-ticker').value.trim().toUpperCase();
+  const newName = document.getElementById('he-name').value.trim();
+  const newType = document.getElementById('he-type').value.trim();
+  const newMv = parseFloat(document.getElementById('he-mv').value);
+  const newRisk = parseInt(document.getElementById('he-risk').value, 10);
+
+  if (isNaN(newRisk) || newRisk < 0 || newRisk > 100) {
+    alert('Risk score must be a whole number between 0 and 100.');
+    return;
+  }
+  if (isNaN(newMv) || newMv < 0) {
+    alert('Market value must be a non-negative number.');
+    return;
+  }
+
+  const prevRisk = Math.round(parseFloat(h.risk_score) || 50);
+
+  h.ticker = newTicker;
+  h.name = newName;
+  h.type = newType;
+  h.market_value = newMv;
+  h.risk_score = newRisk;
+  h.risk_level = riskLevelLabel(newRisk);
+
+  if (newRisk !== prevRisk) h._manualOverride = true;
+
+  // Recalc allocation percentages across all holdings in this account
+  const totalMv = acct.holdings.reduce((s, x) => s + (parseFloat(x.market_value) || 0), 0);
+  if (totalMv > 0) {
+    acct.holdings.forEach(x => { x.allocation_pct = (parseFloat(x.market_value) || 0) / totalMv * 100; });
+  }
+
+  closeHoldingEdit();
+  rerenderAccounts();
   recalcPortfolio();
 }
 
@@ -7319,6 +7457,46 @@ if (document.readyState === 'loading') {
 }
 </script>
 
+
+<!-- ══ HOLDING EDIT MODAL ══ -->
+<div class="aa-overlay" id="he-overlay" style="display:none" onclick="if(event.target===this)closeHoldingEdit()">
+  <div class="aa-modal" style="max-width:520px">
+    <div class="aa-modal-head">
+      <div class="aa-modal-title">Edit Holding</div>
+      <button class="aa-modal-close" onclick="closeHoldingEdit()">✕</button>
+    </div>
+    <div class="aa-modal-body">
+      <div class="he-grid">
+        <div>
+          <div class="aa-field-label">Ticker</div>
+          <input class="aa-input" id="he-ticker" placeholder="(optional)">
+        </div>
+        <div>
+          <div class="aa-field-label">Type</div>
+          <input class="aa-input" id="he-type" placeholder="e.g. Variable Annuity">
+        </div>
+        <div class="he-full">
+          <div class="aa-field-label">Name / Description</div>
+          <input class="aa-input" id="he-name" placeholder="Full holding name">
+        </div>
+        <div>
+          <div class="aa-field-label">Market Value ($)</div>
+          <input class="aa-input" id="he-mv" type="number" step="100" min="0" placeholder="0">
+        </div>
+        <div>
+          <div class="aa-field-label">Risk Score (0–100)</div>
+          <input class="aa-input" id="he-risk" type="number" min="0" max="100" placeholder="50">
+        </div>
+      </div>
+      <div class="he-note" id="he-override-note" style="display:none">✎ Risk score has been manually overridden.</div>
+      <div class="he-note">Saving will recalculate this account's allocation percentages and the overall portfolio score.</div>
+    </div>
+    <div class="aa-modal-footer">
+      <button class="aa-cancel-btn" onclick="closeHoldingEdit()">Cancel</button>
+      <button class="aa-confirm-btn" onclick="saveHoldingEdit()">Save Changes</button>
+    </div>
+  </div>
+</div>
 
 </body>
 </html>
