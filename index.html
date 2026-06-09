@@ -560,12 +560,22 @@ body{font-family:'Nunito Sans',sans-serif;background:var(--cream);color:var(--te
 .pb-step-sub{font-size:.76rem;color:var(--slate-lt);margin-bottom:18px;padding-left:36px;}
 
 /* Upload area for current portfolio */
-.pb-upload{border:2px dashed var(--border);border-radius:12px;padding:28px;text-align:center;background:var(--cream);cursor:pointer;transition:all .18s;}
+.pb-upload{border:2px dashed var(--border);border-radius:12px;padding:28px;text-align:center;background:var(--cream);cursor:pointer;transition:all .18s;display:block;box-sizing:border-box;}
 .pb-upload:hover{border-color:var(--gold);background:rgba(201,168,76,.04);}
 .pb-upload-icon{font-size:1.6rem;margin-bottom:6px;}
-.pb-upload-label{font-size:.84rem;font-weight:700;color:var(--navy);margin-bottom:3px;}
+.pb-upload-title{font-size:.84rem;font-weight:700;color:var(--navy);margin-bottom:3px;font-family:'Nunito Sans',sans-serif;}
 .pb-upload-hint{font-size:.68rem;color:var(--slate-lt);}
 .pb-upload.has-file{border-style:solid;border-color:var(--gold);background:rgba(201,168,76,.05);}
+.pb-or-divider{display:flex;align-items:center;gap:12px;margin:16px 0 12px;color:var(--slate-lt);font-size:.62rem;font-weight:700;letter-spacing:.16em;}
+.pb-or-divider::before,.pb-or-divider::after{content:'';flex:1;height:1px;background:var(--border);}
+.pb-skip-btn{display:flex;align-items:center;gap:14px;width:100%;background:#fff;border:1.5px solid var(--border);border-radius:10px;padding:14px 18px;text-align:left;cursor:pointer;transition:all .18s;font-family:'Nunito Sans',sans-serif;box-sizing:border-box;}
+.pb-skip-btn:hover{border-color:var(--gold);background:rgba(201,168,76,.04);}
+.pb-skip-icon{font-size:1.3rem;flex-shrink:0;line-height:1;}
+.pb-skip-text{flex:1;}
+.pb-skip-title{font-size:.8rem;font-weight:700;color:var(--navy);margin-bottom:2px;}
+.pb-skip-hint{font-size:.66rem;color:var(--slate-lt);line-height:1.4;}
+.pb-skip-btn.active{border-color:var(--gold);background:rgba(201,168,76,.08);}
+.pb-skip-btn.active .pb-skip-title::after{content:' ✓';color:var(--gold);}
 
 /* Current portfolio summary card */
 .pb-summary-card{background:linear-gradient(135deg,#1b2b3a,#202e3b);color:#fff;border-radius:12px;padding:18px 22px;display:grid;grid-template-columns:1fr auto auto auto;gap:24px;align-items:center;}
@@ -4901,13 +4911,23 @@ const mammoth = {
       <div class="pb-step-sub">Image, PDF, Excel, CSV, or Word doc — same parser as the analyzer.</div>
 
       <div id="pb-upload-area" class="pb-no-export" style="margin-left:36px">
-        <label class="pb-upload" id="pb-upload-label" for="pb-file-input">
+        <label class="pb-upload" id="pb-upload-box" for="pb-file-input">
           <div class="pb-upload-icon">📁</div>
-          <div class="pb-upload-label" id="pb-upload-text">Click or drop the client's current portfolio file</div>
+          <div class="pb-upload-title" id="pb-upload-text">Click or drop the client's current portfolio file</div>
           <div class="pb-upload-hint">PDF, image, Excel (.xlsx), CSV, or Word (.docx)</div>
         </label>
-        <input type="file" id="pb-file-input" style="display:none" accept=".pdf,.png,.jpg,.jpeg,.csv,.xlsx,.xls,.docx,.doc" onchange="pbHandleUpload(this.files[0])">
+        <input type="file" id="pb-file-input" accept=".pdf,.png,.jpg,.jpeg,.csv,.xlsx,.xls,.docx,.doc" onchange="pbHandleUpload(this.files[0])" style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none">
         <div class="pb-status" id="pb-upload-status"></div>
+
+        <div class="pb-or-divider"><span>OR</span></div>
+
+        <button class="pb-skip-btn" id="pb-skip-btn" type="button" onclick="pbSkipCurrent()">
+          <span class="pb-skip-icon">✨</span>
+          <span class="pb-skip-text">
+            <span class="pb-skip-title">Start from scratch — no current portfolio</span>
+            <span class="pb-skip-hint">For new clients or fresh allocations. The proposal will show only the proposed portfolio side.</span>
+          </span>
+        </button>
       </div>
 
       <!-- Filled after upload + parse -->
@@ -7669,7 +7689,8 @@ let _pbState = {
   sleeves: [],              // see schema in pbBuildSleeve
   notes: '',
   uploadedFile: null,
-  uploadedFileData: null
+  uploadedFileData: null,
+  noCurrent: false          // true = user chose "start from scratch"
 };
 let _pbSleeveCounter = 0;
 let _pbCustomRowCounter = 0;
@@ -7677,27 +7698,62 @@ let _pbCustomRowCounter = 0;
 // ── Reset everything ──
 function pbReset() {
   if (!confirm('Start over? This will clear the current portfolio and all sleeves.')) return;
-  _pbState = { current: null, sleeves: [], notes: '', uploadedFile: null, uploadedFileData: null };
+  _pbState = { current: null, sleeves: [], notes: '', uploadedFile: null, uploadedFileData: null, noCurrent: false };
   document.getElementById('pb-current-summary').style.display = 'none';
   document.getElementById('pb-step2').style.display = 'none';
   document.getElementById('pb-step3').style.display = 'none';
   document.getElementById('pb-upload-status').textContent = '';
-  document.getElementById('pb-upload-text').textContent = 'Click or drop the current portfolio file';
-  document.getElementById('pb-upload-label').classList.remove('has-file');
+  document.getElementById('pb-upload-text').textContent = "Click or drop the client's current portfolio file";
+  document.getElementById('pb-upload-box').classList.remove('has-file');
+  document.getElementById('pb-skip-btn').classList.remove('active');
   document.getElementById('pb-step1-num').classList.remove('done');
   document.getElementById('pb-notes').value = '';
   const list = document.getElementById('pb-sleeves-list');
   if (list) list.innerHTML = '';
 }
 
+// ── Skip current portfolio (build from scratch) ──
+function pbSkipCurrent() {
+  // If already in skip mode, undo
+  if (_pbState.noCurrent) {
+    _pbState.noCurrent = false;
+    document.getElementById('pb-skip-btn').classList.remove('active');
+    document.getElementById('pb-step1-num').classList.remove('done');
+    if (!_pbState.current) {
+      document.getElementById('pb-step2').style.display = 'none';
+      document.getElementById('pb-step3').style.display = 'none';
+    }
+    pbRenderComparison();
+    return;
+  }
+  _pbState.noCurrent = true;
+  _pbState.current = null;
+  _pbState.uploadedFile = null;
+  _pbState.uploadedFileData = null;
+  document.getElementById('pb-upload-status').textContent = '';
+  document.getElementById('pb-upload-text').textContent = "Click or drop the client's current portfolio file";
+  document.getElementById('pb-upload-box').classList.remove('has-file');
+  document.getElementById('pb-skip-btn').classList.add('active');
+  document.getElementById('pb-step1-num').classList.add('done');
+  document.getElementById('pb-current-summary').style.display = 'none';
+  document.getElementById('pb-step2').style.display = 'block';
+  document.getElementById('pb-step3').style.display = 'block';
+  pbRenderSleeves();
+  pbRenderComparison();
+}
+
 // ── Handle current portfolio file upload ──
 async function pbHandleUpload(file) {
   if (!file) return;
+  // If user uploads a real file, exit skip mode
+  _pbState.noCurrent = false;
+  document.getElementById('pb-skip-btn').classList.remove('active');
+
   _pbState.uploadedFile = file;
-  const label = document.getElementById('pb-upload-label');
+  const box = document.getElementById('pb-upload-box');
   const text = document.getElementById('pb-upload-text');
   text.textContent = '⏳ ' + file.name;
-  label.classList.add('has-file');
+  box.classList.add('has-file');
   const status = document.getElementById('pb-upload-status');
   status.classList.remove('err');
   status.textContent = 'Reading file…';
@@ -7730,8 +7786,8 @@ async function pbHandleUpload(file) {
     console.error(err);
     status.classList.add('err');
     status.textContent = '✗ ' + (err.message || 'Upload failed. Try a different file.');
-    text.textContent = 'Click or drop the current portfolio file';
-    label.classList.remove('has-file');
+    text.textContent = "Click or drop the client's current portfolio file";
+    box.classList.remove('has-file');
   }
 }
 
@@ -8217,34 +8273,37 @@ function pbComputeProposed() {
 // ── Render the comparison panel ──
 function pbRenderComparison() {
   const c = _pbState.current;
+  const noCurrent = _pbState.noCurrent === true;
   const p = pbComputeProposed();
   const wrap = document.getElementById('pb-comparison');
   if (!wrap) return;
-  if (!c) { wrap.innerHTML = ''; return; }
+  if (!c && !noCurrent) { wrap.innerHTML = ''; return; }
 
   const noProposed = !p.risk;
-  const cCol = riskColor(c.risk_score);
+  const cCol = c ? riskColor(c.risk_score) : '#a8b8cc';
   const pCol = noProposed ? '#a8b8cc' : riskColor(p.risk);
-  const delta = noProposed ? null : (p.risk - c.risk_score);
+  const delta = (noProposed || noCurrent) ? null : (p.risk - c.risk_score);
   const deltaClass = delta === null ? 'pb-delta-flat' : (delta > 0 ? 'pb-delta-up' : delta < 0 ? 'pb-delta-down' : 'pb-delta-flat');
   const deltaArrow = delta === null ? '—' : (delta > 0 ? '▲' : delta < 0 ? '▼' : '◆');
 
-  // Asset allocation rows — show both current and proposed bars
+  // Asset allocation rows — show both current and proposed bars (current omitted in scratch mode)
   const allocKeys = ['Equities','Fixed Income','Cash','Annuities','Structured Notes','Alternatives'];
   const bucketColors = {
     'Equities':'#2d5a8a', 'Fixed Income':'#22a06b', 'Cash':'#6b7e96',
     'Annuities':'#9b59b6', 'Structured Notes':'#d4820a', 'Alternatives':'#c9a84c'
   };
-  const allocRows = allocKeys.filter(k => (c.asset_alloc[k] || 0) > 0.05 || (p.alloc && p.alloc[k] > 0.05)).map(k => {
-    const cv = c.asset_alloc[k] || 0;
+  const allocRows = allocKeys.filter(k => (c && (c.asset_alloc[k] || 0) > 0.05) || (p.alloc && p.alloc[k] > 0.05)).map(k => {
+    const cv = c ? (c.asset_alloc[k] || 0) : 0;
     const pv = p.alloc ? (p.alloc[k] || 0) : 0;
     const bc = bucketColors[k];
     return `
       <div class="pb-alloc-row">
         <div class="pb-alloc-label">${k}</div>
         <div class="pb-alloc-bar-wrap">
-          <div class="pb-alloc-bar-bg"><div class="pb-alloc-bar-fill" style="width:${cv.toFixed(1)}%;background:${bc}"></div></div>
-          <div class="pb-alloc-pct">${cv.toFixed(1)}%</div>
+          ${noCurrent
+            ? '<div style="font-size:.65rem;color:var(--slate-lt);font-style:italic;text-align:center">—</div>'
+            : `<div class="pb-alloc-bar-bg"><div class="pb-alloc-bar-fill" style="width:${cv.toFixed(1)}%;background:${bc}"></div></div>
+               <div class="pb-alloc-pct">${cv.toFixed(1)}%</div>`}
         </div>
         <div class="pb-alloc-bar-wrap">
           <div class="pb-alloc-bar-bg"><div class="pb-alloc-bar-fill" style="width:${pv.toFixed(1)}%;background:${bc}"></div></div>
@@ -8264,17 +8323,30 @@ function pbRenderComparison() {
     </tr>`;
   }).join('');
 
-  wrap.innerHTML = `
-    <div class="pb-compare-grid">
-      <div class="pb-compare-col">
+  // Current-side card content (real data, or "scratch" placeholder)
+  const currentCardBody = noCurrent ? `
+        <div class="pb-compare-head">Current Portfolio</div>
+        <div class="pb-compare-score" style="color:#a8b8cc;font-size:2.6rem">—</div>
+        <div class="pb-compare-level" style="color:var(--slate-lt);font-style:italic">Starting from scratch</div>
+        <div class="pb-compare-bar-bg"><div class="pb-compare-bar-fill" style="width:0%"></div></div>
+        <div class="pb-compare-stat" style="font-style:italic;color:var(--slate-lt)"><span>No current portfolio</span><strong>—</strong></div>
+        <div class="pb-compare-stat" style="font-style:italic;color:var(--slate-lt)"><span>Building a new allocation</span><strong>—</strong></div>` : `
         <div class="pb-compare-head">Current Portfolio</div>
         <div class="pb-compare-score" style="color:${cCol}">${c.risk_score}</div>
         <div class="pb-compare-level">${riskLevelLabel(c.risk_score)}</div>
         <div class="pb-compare-bar-bg"><div class="pb-compare-bar-fill" style="width:${c.risk_score}%;background:${cCol}"></div></div>
         <div class="pb-compare-stat"><span>Total Value</span><strong>$${Math.round(c.total_value).toLocaleString('en-US')}</strong></div>
         <div class="pb-compare-stat"><span>Accounts</span><strong>${(c.accounts||[]).length}</strong></div>
-        <div class="pb-compare-stat"><span>Positions</span><strong>${c.accounts.reduce((s,a)=>s+(a.holdings||[]).length,0)}</strong></div>
-      </div>
+        <div class="pb-compare-stat"><span>Positions</span><strong>${c.accounts.reduce((s,a)=>s+(a.holdings||[]).length,0)}</strong></div>`;
+
+  // Proposed-side bottom stat depends on whether we have a current total to anchor to
+  const proposedTotalStat = c
+    ? `<div class="pb-compare-stat"><span>Estimated Total</span><strong>$${Math.round(c.total_value).toLocaleString('en-US')}</strong></div>`
+    : '';
+
+  wrap.innerHTML = `
+    <div class="pb-compare-grid">
+      <div class="pb-compare-col">${currentCardBody}</div>
       <div class="pb-compare-col proposed">
         <div class="pb-compare-head proposed">Proposed Portfolio</div>
         <div class="pb-compare-score" style="color:${pCol}">${noProposed ? '—' : p.risk}</div>
@@ -8282,11 +8354,11 @@ function pbRenderComparison() {
         <div class="pb-compare-bar-bg"><div class="pb-compare-bar-fill" style="width:${noProposed?0:p.risk}%;background:${pCol}"></div></div>
         <div class="pb-compare-stat"><span>Sleeves</span><strong>${_pbState.sleeves.length}</strong></div>
         <div class="pb-compare-stat"><span>Weight Allocated</span><strong style="color:${Math.abs(p.totalWeight-100)<0.01?'var(--green)':'#c0392b'}">${p.totalWeight.toFixed(1)}%</strong></div>
-        <div class="pb-compare-stat"><span>Estimated Total</span><strong>$${Math.round(c.total_value).toLocaleString('en-US')}</strong></div>
+        ${proposedTotalStat}
       </div>
     </div>
 
-    ${!noProposed ? `
+    ${(!noProposed && !noCurrent) ? `
     <div class="pb-delta-banner">
       <div>
         <div class="pb-delta-label">Risk Score Change</div>
@@ -8299,10 +8371,10 @@ function pbRenderComparison() {
     </div>` : ''}
 
     <div style="margin-top:22px">
-      <div style="font-size:.65rem;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--slate);margin-bottom:10px">Asset Allocation Comparison</div>
+      <div style="font-size:.65rem;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--slate);margin-bottom:10px">${noCurrent ? 'Proposed Allocation' : 'Asset Allocation Comparison'}</div>
       <div class="pb-alloc-row" style="border-bottom:2px solid var(--navy);padding-bottom:6px">
         <div style="font-size:.6rem;color:var(--slate-lt);font-weight:700;letter-spacing:.08em;text-transform:uppercase">Asset Class</div>
-        <div style="font-size:.6rem;color:var(--slate-lt);font-weight:700;letter-spacing:.08em;text-transform:uppercase">Current</div>
+        <div style="font-size:.6rem;color:var(--slate-lt);font-weight:700;letter-spacing:.08em;text-transform:uppercase">${noCurrent ? '—' : 'Current'}</div>
         <div style="font-size:.6rem;color:var(--gold);font-weight:700;letter-spacing:.08em;text-transform:uppercase">Proposed</div>
       </div>
       ${allocRows || '<div style="padding:14px;text-align:center;color:var(--slate-lt);font-size:.74rem;font-style:italic">No allocation data yet — add sleeves to see the breakdown.</div>'}
@@ -8328,7 +8400,7 @@ function pbRenderComparison() {
 
 // ── Save proposal as PDF (uses existing saveAsImage on the proposal view) ──
 function pbSaveAsImage() {
-  if (!_pbState.current) { alert('Upload a current portfolio first.'); return; }
+  if (!_pbState.current && !_pbState.noCurrent) { alert('Upload a current portfolio first, or click "Start from scratch" to skip.'); return; }
   if (!_pbState.sleeves.length) { alert('Add at least one sleeve before saving.'); return; }
   pbPrepForExport();
   saveAsImage('view-proposal', null, 'portfolio-proposal');
@@ -8337,7 +8409,7 @@ function pbSaveAsImage() {
 
 // ── Download as standalone HTML ──
 function pbDownloadHtml() {
-  if (!_pbState.current) { alert('Upload a current portfolio first.'); return; }
+  if (!_pbState.current && !_pbState.noCurrent) { alert('Upload a current portfolio first, or click "Start from scratch" to skip.'); return; }
   if (!_pbState.sleeves.length) { alert('Add at least one sleeve before saving.'); return; }
   pbPrepForExport();
   saveAsImage('view-proposal', null, 'portfolio-proposal', true);
