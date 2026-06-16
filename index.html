@@ -2135,11 +2135,14 @@ async function analyzePortfolio() {
     const knownScoresJSON = JSON.stringify(knownScoresObj);
 
     // Pre-extract client first name(s) from account labels (e.g. "Carol - SWM IRA")
+    // Use literal spaces (not \s) between name tokens and around the dash, so the match
+    // can't cross newlines (which would let column headers like "Market Value\nByron"
+    // get captured as a fake two-word name).
     let clientNameHint = '';
     try {
       const flatText = fileContent.map(b => b.text || '').join(' ');
       if (flatText) {
-        const nameMatches = [...flatText.matchAll(/\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s*[-–—]\s*SWM\b/g)];
+        const nameMatches = [...flatText.matchAll(/(?:^|[\r\n,])\s*([A-Z][a-z]+(?:[ ]+[A-Z][a-z]+)?)[ ]*[-–—][ ]*SWM\b/g)];
         const uniqueNames = [...new Set(nameMatches.map(m => m[1].trim()))];
         if (uniqueNames.length === 1) {
           clientNameHint = `The client's name is "${uniqueNames[0]}". Use "${uniqueNames[0]}'s Portfolio" as the portfolio_name. `;
@@ -7824,9 +7827,27 @@ async function pbParseCurrent(file, fileData, ext) {
   Object.assign(knownScoresObj, {SPY:74,QQQ:85,AGG:28,IWM:87,BND:25,TLT:35,VTI:75,GLD:65,IBIT:95});
   const knownScoresJSON = JSON.stringify(knownScoresObj);
 
+  // Pre-extract client first name(s) from account labels (e.g. "Byron - SWM IRA").
+  // Literal-space tokens prevent column headers like "Market Value\nByron" from
+  // collapsing across newlines into a fake two-word name.
+  let clientNameHint = '';
+  try {
+    const flatText = fileContent.map(b => b.text || '').join(' ');
+    if (flatText) {
+      const nameMatches = [...flatText.matchAll(/(?:^|[\r\n,])\s*([A-Z][a-z]+(?:[ ]+[A-Z][a-z]+)?)[ ]*[-–—][ ]*SWM\b/g)];
+      const uniqueNames = [...new Set(nameMatches.map(m => m[1].trim()))];
+      if (uniqueNames.length === 1) {
+        clientNameHint = `The client's name is "${uniqueNames[0]}". Use "${uniqueNames[0]}'s Portfolio" as the portfolio_name. `;
+      } else if (uniqueNames.length >= 2) {
+        const joined = uniqueNames.slice(0, 2).join(' & ');
+        clientNameHint = `The clients are ${uniqueNames.join(' and ')}. Use "${joined}'s Portfolio" as the portfolio_name. `;
+      }
+    }
+  } catch(e) {}
+
   const prompt = `You are a financial risk analyst. Parse this portfolio file and score every holding on a Nitrogen/Riskalyze 0-100 risk scale.
 
-For the portfolio_name: use the real client name only — never use "SWM", "LPL", account numbers, or generic terms like "Client Portfolio".
+${clientNameHint}For the portfolio_name: use the real client name only — never use "SWM", "LPL", account numbers, or generic terms like "Client Portfolio".
 
 KNOWN RISK SCORES (use these directly):
 ${knownScoresJSON}
