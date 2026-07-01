@@ -2135,23 +2135,7 @@ async function analyzePortfolio() {
     const knownScoresJSON = JSON.stringify(knownScoresObj);
 
     // Pre-extract client first name(s) from account labels (e.g. "Carol - SWM IRA")
-    // Use literal spaces (not \s) between name tokens and around the dash, so the match
-    // can't cross newlines (which would let column headers like "Market Value\nByron"
-    // get captured as a fake two-word name).
-    let clientNameHint = '';
-    try {
-      const flatText = fileContent.map(b => b.text || '').join(' ');
-      if (flatText) {
-        const nameMatches = [...flatText.matchAll(/(?:^|[\r\n,])\s*([A-Z][a-z]+(?:[ ]+[A-Z][a-z]+)?)[ ]*[-–—][ ]*SWM\b/g)];
-        const uniqueNames = [...new Set(nameMatches.map(m => m[1].trim()))];
-        if (uniqueNames.length === 1) {
-          clientNameHint = `The client's name is "${uniqueNames[0]}". Use "${uniqueNames[0]}'s Portfolio" as the portfolio_name. `;
-        } else if (uniqueNames.length >= 2) {
-          const joined = uniqueNames.slice(0, 2).join(' & ');
-          clientNameHint = `The clients are ${uniqueNames.join(' and ')}. Use "${joined}'s Portfolio" as the portfolio_name. `;
-        }
-      }
-    } catch(e) {}
+    let clientNameHint = buildClientNameHint(fileContent);
 
     const prompt = buildPortfolioPrompt(knownScoresJSON, clientNameHint);
 
@@ -4690,6 +4674,63 @@ const TICKER_SCORES = {
   // T.Rowe Price Focused 5 funds
   PRASX:86, PRNEX:82, PRGTX:92, PRSCX:90, PRGSX:82,
 };
+
+// ── Client-name extraction from account labels ──
+// Used by both the analyzer and the proposal builder to pre-hint the AI about the
+// portfolio owner(s), so titles don't come back as "Client Portfolio" or worse.
+// Handles: individual accounts ("Byron - SWM IRA"), joint accounts with both names
+// visible ("Byron & Liz - SWM JTWROS", "Byron and Liz - SWM Brokerage"), and rejects
+// generic labels like "Joint - SWM Brokerage" that don't identify a real person.
+const NAME_TOKEN_BLACKLIST = new Set([
+  // Registration types
+  'Joint','Jtwros','Jtten','Ttee','Ttees','Trust','Estate','Household',
+  'Individual','Brokerage','Account','Roth','Ira','Sep','Simple',
+  'Custodian','Uma','Ugma','Utma','Living','Family','Revocable','Irrevocable',
+  // Column headers from common CSV formats
+  'Value','Amount','Total','Cash','Market','Description','Asset',
+  'Sector','Class','Date','Cost','Price','Units','Fund','Money',
+  // Firm/product identifiers that occasionally sit in the label slot
+  'Swm','Lpl','Advisor'
+]);
+
+function extractClientFirstNames(text) {
+  if (!text) return [];
+  const names = [];
+  const seen = new Set();
+  // Dual-name pattern first (more specific): "X & Y - SWM" / "X and Y - SWM"
+  const dualRe = /(?:^|[\r\n,])\s*([A-Z][a-z]+)[ ]+(?:&|And|and)[ ]+([A-Z][a-z]+)(?:[ ]+[A-Z][a-z]+)?[ ]*[-–—][ ]*SWM\b/g;
+  for (const m of text.matchAll(dualRe)) {
+    for (const cand of [m[1], m[2]]) {
+      if (!NAME_TOKEN_BLACKLIST.has(cand) && !seen.has(cand)) {
+        seen.add(cand); names.push(cand);
+      }
+    }
+  }
+  // Single-name pattern: "X - SWM" (optionally "X Y - SWM" for first+last)
+  const singleRe = /(?:^|[\r\n,])\s*([A-Z][a-z]+)(?:[ ]+[A-Z][a-z]+)?[ ]*[-–—][ ]*SWM\b/g;
+  for (const m of text.matchAll(singleRe)) {
+    const cand = m[1];
+    if (!NAME_TOKEN_BLACKLIST.has(cand) && !seen.has(cand)) {
+      seen.add(cand); names.push(cand);
+    }
+  }
+  return names;
+}
+
+function buildClientNameHint(fileContent) {
+  try {
+    const flatText = (fileContent || []).map(b => b.text || '').join(' ');
+    const uniqueNames = extractClientFirstNames(flatText);
+    if (uniqueNames.length === 1) {
+      return `The client's name is "${uniqueNames[0]}". Use "${uniqueNames[0]}'s Portfolio" as the portfolio_name. `;
+    } else if (uniqueNames.length >= 2) {
+      const joined = uniqueNames.slice(0, 2).join(' & ');
+      return `The clients are ${uniqueNames.join(' and ')}. Use "${joined}'s Portfolio" as the portfolio_name. `;
+    }
+  } catch(e) {}
+  return '';
+}
+
 
 const STRUCTURED_ISSUERS = [
   'jpmorgan','jp morgan','morgan stanley','goldman sachs','goldman','citigroup','citi',
@@ -7828,22 +7869,7 @@ async function pbParseCurrent(file, fileData, ext) {
   const knownScoresJSON = JSON.stringify(knownScoresObj);
 
   // Pre-extract client first name(s) from account labels (e.g. "Byron - SWM IRA").
-  // Literal-space tokens prevent column headers like "Market Value\nByron" from
-  // collapsing across newlines into a fake two-word name.
-  let clientNameHint = '';
-  try {
-    const flatText = fileContent.map(b => b.text || '').join(' ');
-    if (flatText) {
-      const nameMatches = [...flatText.matchAll(/(?:^|[\r\n,])\s*([A-Z][a-z]+(?:[ ]+[A-Z][a-z]+)?)[ ]*[-–—][ ]*SWM\b/g)];
-      const uniqueNames = [...new Set(nameMatches.map(m => m[1].trim()))];
-      if (uniqueNames.length === 1) {
-        clientNameHint = `The client's name is "${uniqueNames[0]}". Use "${uniqueNames[0]}'s Portfolio" as the portfolio_name. `;
-      } else if (uniqueNames.length >= 2) {
-        const joined = uniqueNames.slice(0, 2).join(' & ');
-        clientNameHint = `The clients are ${uniqueNames.join(' and ')}. Use "${joined}'s Portfolio" as the portfolio_name. `;
-      }
-    }
-  } catch(e) {}
+  const clientNameHint = buildClientNameHint(fileContent);
 
   const prompt = `You are a financial risk analyst. Parse this portfolio file and score every holding on a Nitrogen/Riskalyze 0-100 risk scale.
 
