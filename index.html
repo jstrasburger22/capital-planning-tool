@@ -509,6 +509,7 @@ body{font-family:'Nunito Sans',sans-serif;background:var(--cream);color:var(--te
 .st-stat-label{font-size:.58rem;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--slate);margin-bottom:6px;}
 .st-stat-value{font-family:'Playfair Display',serif;font-size:1.4rem;font-weight:700;}
 .st-stat-value.loss{color:#c0392b;}
+.st-stat-value.gain{color:#16a34a;}
 .st-stat-value.recovery{color:#1a6b4a;}
 .st-stat-value.neutral{color:var(--navy);}
 .st-stat-sub{font-size:.62rem;color:var(--slate);margin-top:3px;}
@@ -1903,12 +1904,21 @@ ${exportBody}
     <div class="st-modal-body">
 
       <div class="st-tabs" id="st-tabs">
-        <div class="st-tab active" onclick="switchScenario('2008')">2008 Crisis</div>
-        <div class="st-tab" onclick="switchScenario('covid')">2020 COVID</div>
-        <div class="st-tab" onclick="switchScenario('2022')">2022 Rate Hike</div>
-        <div class="st-tab" onclick="switchScenario('dotcom')">Dot-com Bust</div>
-        <div class="st-tab" onclick="switchScenario('stagflation')">Stagflation</div>
-        <div class="st-tab" onclick="switchScenario('custom')">⚙️ Custom</div>
+        <div style="display:flex;align-items:center;gap:6px;width:100%;flex-wrap:wrap">
+          <span style="font-size:.58rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#c0392b;padding:3px 8px;background:#fde8e8;border-radius:20px;white-space:nowrap">📉 Bear Markets</span>
+          <div class="st-tab active" onclick="switchScenario('2008')">2008 Crisis</div>
+          <div class="st-tab" onclick="switchScenario('covid')">2020 COVID</div>
+          <div class="st-tab" onclick="switchScenario('2022')">2022 Rate Hike</div>
+          <div class="st-tab" onclick="switchScenario('dotcom')">Dot-com Bust</div>
+          <div class="st-tab" onclick="switchScenario('stagflation')">Stagflation</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;width:100%;flex-wrap:wrap;margin-top:4px">
+          <span style="font-size:.58rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#22a06b;padding:3px 8px;background:#e6f4ed;border-radius:20px;white-space:nowrap">📈 Bull Markets</span>
+          <div class="st-tab" onclick="switchScenario('bull2013')">2013 Post-Crisis</div>
+          <div class="st-tab" onclick="switchScenario('bull2017')">2017 Low-Vol</div>
+          <div class="st-tab" onclick="switchScenario('bull2021')">2021 Post-COVID</div>
+          <div class="st-tab" onclick="switchScenario('custom')">⚙️ Custom</div>
+        </div>
       </div>
 
       <div id="st-scenario-content"><!-- filled by JS --></div>
@@ -2082,68 +2092,300 @@ function showAnalyzing(title, sub) {
   document.getElementById('az-status-sub').textContent   = sub  || 'Extracting holdings and scoring risk levels';
 }
 
+// ── Parse a CSV/Excel file locally into grouped accounts without any AI call ──
+// Returns { portfolio_name, accounts } in the same shape renderPortfolio expects.
+// Columns recognised (case-insensitive, any order):
+//   Account, Ticker, CUSIP, Description/Name, Asset Class/Sector, Market Value
+function parseCSVLocally(csvText) {
+  const lines = csvText.split(/\r?\n/).filter(l => l.trim());
+  if (lines.length < 2) return null;
+
+  // Detect delimiter
+  const delim = lines[0].includes('\t') ? '\t' : ',';
+
+  function splitRow(row) {
+    // Handle quoted fields
+    const cells = [];
+    let cur = '', inQ = false;
+    for (let i = 0; i < row.length; i++) {
+      const c = row[i];
+      if (c === '"') { inQ = !inQ; }
+      else if (c === delim && !inQ) { cells.push(cur.trim()); cur = ''; }
+      else cur += c;
+    }
+    cells.push(cur.trim());
+    return cells;
+  }
+
+  const headers = splitRow(lines[0]).map(h => h.replace(/^"|"$/g,'').trim().toLowerCase());
+
+  // Column index finders
+  const col = (candidates) => {
+    for (const c of candidates) {
+      const idx = headers.findIndex(h => h.includes(c));
+      if (idx !== -1) return idx;
+    }
+    return -1;
+  };
+
+  const iAcct   = col(['account']);
+  const iTicker = col(['ticker','symbol']);
+  const iCusip  = col(['cusip']);
+  const iName   = col(['description','name','security']);
+  const iClass  = col(['asset class','asset_class','sector','category','type']);
+  const iMV     = col(['market value','market_value','mkt value','value','amount']);
+
+  if (iMV === -1 && iTicker === -1) return null; // can't do anything useful
+
+  const accountMap = {};
+  const accountOrder = [];
+
+  for (let i = 1; i < lines.length; i++) {
+    const cells = splitRow(lines[i]);
+    if (cells.every(c => !c)) continue;
+
+    const acctName  = iAcct   >= 0 ? (cells[iAcct]  || '').replace(/^"|"$/g,'').trim() : 'Portfolio';
+    const ticker    = iTicker >= 0 ? (cells[iTicker] || '').replace(/^"|"$/g,'').trim().toUpperCase() : '';
+    const cusip     = iCusip  >= 0 ? (cells[iCusip]  || '').replace(/^"|"$/g,'').trim() : '';
+    const rawName   = iName   >= 0 ? (cells[iName]   || '').replace(/^"|"$/g,'').trim() : '';
+    const assetCls  = iClass  >= 0 ? (cells[iClass]  || '').replace(/^"|"$/g,'').trim() : '';
+    const mvRaw     = iMV     >= 0 ? (cells[iMV]     || '').replace(/^"|"$/g,'').replace(/[$,]/g,'').trim() : '0';
+    const mv        = parseFloat(mvRaw) || 0;
+
+    if (!ticker && !rawName && mv === 0) continue;
+
+    if (!accountMap[acctName]) {
+      accountMap[acctName] = [];
+      accountOrder.push(acctName);
+    }
+
+    // Assign score locally — classifyHolding first, then TICKER_SCORES table
+    const fakeH = { ticker, name: rawName, type: assetCls, risk_score: 50 };
+    const classified = classifyHolding(fakeH);
+    let score, typeFinal;
+    if (classified) {
+      score = classified.score;
+      typeFinal = classified.type;
+    } else {
+      const local = TICKER_SCORES[ticker] || _sessionScoreCache[ticker];
+      score = local !== undefined ? local : null; // null = needs AI
+      typeFinal = assetCls || '';
+    }
+
+    accountMap[acctName].push({
+      ticker,
+      cusip,
+      name: rawName,
+      type: typeFinal,
+      market_value: mv,
+      allocation_pct: 0,    // calculated later after grouping
+      risk_score: score,    // null = unknown, filled by AI batch
+      risk_level: score !== null ? riskLevelLabel(score) : 'Unknown',
+      _needsScore: score === null,
+    });
+  }
+
+  if (!accountOrder.length) return null;
+
+  // Extract client name from account labels like "Dann - MWP IRA (7473)"
+  const allNames = accountOrder.map(a => {
+    const m = a.match(/^([A-Z][a-z]+)\s*[-–]/);
+    return m ? m[1] : null;
+  }).filter(Boolean);
+  const uniqueNames = [...new Set(allNames)];
+  const portfolioName = uniqueNames.length >= 2
+    ? uniqueNames.slice(0, 2).join(' & ') + "'s Portfolio"
+    : uniqueNames.length === 1
+    ? uniqueNames[0] + "'s Portfolio"
+    : 'Client Portfolio';
+
+  const accounts = accountOrder.map(acctName => {
+    const holdings = accountMap[acctName];
+    const total = holdings.reduce((s, h) => s + (h.market_value || 0), 0);
+    holdings.forEach(h => {
+      h.allocation_pct = total > 0 ? parseFloat((h.market_value / total * 100).toFixed(2)) : 0;
+    });
+    return { account_name: acctName, holdings };
+  });
+
+  return { portfolio_name: portfolioName, accounts };
+}
+
+// ── Score unknown tickers in batches via AI (max 40 per call) ──
+async function scoreUnknownTickersBatch(unknownHoldings) {
+  if (!unknownHoldings.length) return;
+
+  // Deduplicate by ticker so we don't ask about the same ticker twice
+  const tickerMap = {}; // ticker -> first holding object (for name/type hints)
+  unknownHoldings.forEach(h => {
+    const t = h.ticker || h.name || '?';
+    if (!tickerMap[t]) tickerMap[t] = h;
+  });
+  const unique = Object.entries(tickerMap);
+
+  // Split into batches of 40
+  const BATCH = 40;
+  for (let start = 0; start < unique.length; start += BATCH) {
+    const batch = unique.slice(start, start + BATCH);
+    const batchNum = Math.floor(start / BATCH) + 1;
+    const totalBatches = Math.ceil(unique.length / BATCH);
+    document.getElementById('az-status-sub').textContent =
+      `Scoring unknown holdings… (batch ${batchNum}/${totalBatches})`;
+
+    const listStr = batch.map(([t, h], i) =>
+      `${i+1}. Ticker: ${t || '(none)'} | Name: ${h.name || '(none)'} | Type: ${h.type || '(none)'}`
+    ).join('\n');
+
+    const prompt = `You are a financial risk analyst. Score each security below on a Nitrogen/Riskalyze 0-100 risk scale.
+
+SECURITIES TO SCORE:
+${listStr}
+
+CALIBRATION: SPY=74, QQQ=85, IWM=87, AGG=28, TLT=35, HYG=48, GLD=65, EEM=82, IBIT=95
+Individual stocks score HIGHER than ETFs (concentration risk):
+- Blue-chip mega-cap stable (AAPL,MSFT,JNJ,WMT): 80-86
+- Large-cap growth/tech (AMZN,META,GOOGL): 88-92
+- High-volatility (NVDA,TSLA,AMD): 93-97
+ETFs: Large blend 72-76, Growth 78-84, Small cap 84-88, Intl developed 74-78, EM 80-84
+Bonds: IG corp 28-34, HY 45-52, Short-term 15-22, Muni 20-26
+Cash/MM=5, Annuity=5, Variable Annuity=50, Structured Note=30, CD=5
+
+Return ONLY a JSON array (no markdown), one entry per security in the same order:
+[{"ticker":"X","risk_score":74,"type":"Large Cap ETF"},...]`;
+
+    try {
+      async function callBatchProxy(attempt = 0) {
+        if (attempt > 0) await new Promise(r => setTimeout(r, 3000 * attempt));
+        const resp = await fetch('/api/proxy', {
+          method: 'POST',
+          headers: getApiHeaders(),
+          body: JSON.stringify({
+            model: 'claude-sonnet-4-6',
+            max_tokens: 2000,
+            messages: [{ role: 'user', content: prompt }]
+          })
+        });
+        if (resp.status === 529 || resp.status === 500 || resp.status === 503) {
+          if (attempt >= 3) return null;
+          return callBatchProxy(attempt + 1);
+        }
+        if (!resp.ok) return null;
+        return resp.json();
+      }
+
+      const data = await callBatchProxy();
+      if (!data || data.error) continue;
+
+      const txt = (data.content || []).map(b => b.text || '').join('').replace(/```json|```/g,'').trim();
+      const m = txt.match(/\[[\s\S]*\]/);
+      if (!m) continue;
+      const scored = JSON.parse(m[0]);
+
+      scored.forEach((s, i) => {
+        if (!batch[i]) return;
+        const [ticker] = batch[i];
+        const score = Math.round(parseFloat(s.risk_score) || 50);
+        const type  = s.type || '';
+        // Cache it
+        if (ticker && ticker !== '(none)') cacheScore(ticker, score);
+        // Apply to ALL holdings with this ticker across all accounts
+        unknownHoldings.forEach(h => {
+          if ((h.ticker || h.name || '?') === ticker) {
+            h.risk_score = score;
+            h.risk_level = riskLevelLabel(score);
+            if (type && !h.type) h.type = type;
+            delete h._needsScore;
+          }
+        });
+      });
+    } catch(e) {
+      console.warn('Batch scoring error:', e);
+      // Don't fail — leave score as 50 fallback for this batch
+    }
+  }
+
+  // Assign fallback 50 to anything still unscored
+  unknownHoldings.forEach(h => {
+    if (h._needsScore) {
+      h.risk_score = 50;
+      h.risk_level = 'Moderate';
+      delete h._needsScore;
+    }
+  });
+}
+
 async function analyzePortfolio() {
   if (!uploadedFile || !uploadedFileData) return;
   showAnalyzing('Analyzing Portfolio…', 'Reading document…');
 
   try {
     const ext = uploadedFile.name.split('.').pop().toLowerCase();
+    const isCSVlike = ext === 'csv' || ext === 'xlsx' || ext === 'xls';
 
-    // ── Step 1: Pre-process file (fast, local) ──
+    // ── CSV / Excel path: parse locally, only call AI for unknown tickers ──
+    if (isCSVlike) {
+      let csvText = '';
+      if (ext === 'csv') {
+        csvText = uploadedFileData;
+      } else {
+        // Excel → convert to CSV locally
+        const wb  = XLSX.read(uploadedFileData, { type: 'array' });
+        const ws  = wb.Sheets[wb.SheetNames[0]];
+        csvText   = XLSX.utils.sheet_to_csv(ws);
+        if (!csvText.trim()) throw new Error('Excel file appears empty or could not be parsed.');
+      }
+
+      document.getElementById('az-status-sub').textContent = 'Parsing holdings locally…';
+      const parsed = parseCSVLocally(csvText);
+      if (!parsed || !parsed.accounts || !parsed.accounts.flatMap(a => a.holdings).length) {
+        throw new Error('No holdings found in file. Please check the format and try again.');
+      }
+
+      // Collect holdings that still need AI scoring
+      const allHoldings = parsed.accounts.flatMap(a => a.holdings);
+      const needsScore = allHoldings.filter(h => h._needsScore);
+
+      if (needsScore.length > 0) {
+        document.getElementById('az-status-sub').textContent =
+          `Scoring ${needsScore.length} unknown holding${needsScore.length !== 1 ? 's' : ''}…`;
+        await scoreUnknownTickersBatch(needsScore);
+      }
+
+      document.getElementById('az-status-sub').textContent = 'Building results…';
+      renderPortfolio(parsed);
+      return;
+    }
+
+    // ── Image / PDF / DOCX path: send to AI as before ──
     let fileContent = [];
-    if (uploadedFile.type.startsWith('image/') || (!['pdf','csv','xlsx','xls','docx','doc'].includes(ext))) {
+    if (uploadedFile.type.startsWith('image/') || (!['pdf','docx','doc'].includes(ext))) {
       const b64 = uploadedFileData.split(',')[1];
-      fileContent = [
-        { type:'image', source:{ type:'base64', media_type:uploadedFile.type||'image/png', data:b64 } }
-      ];
+      fileContent = [{ type:'image', source:{ type:'base64', media_type:uploadedFile.type||'image/png', data:b64 } }];
     } else if (ext === 'pdf') {
       const b64 = uploadedFileData.split(',')[1];
-      fileContent = [
-        { type:'document', source:{ type:'base64', media_type:'application/pdf', data:b64 } }
-      ];
-    } else if (ext === 'csv') {
-      fileContent = [{ type:'text', text:'FILE CONTENT (CSV):\n' + uploadedFileData }];
-    } else if (ext === 'xlsx' || ext === 'xls') {
-      // uploadedFileData is an ArrayBuffer from readAsArrayBuffer
-      const wb  = XLSX.read(uploadedFileData, { type:'array' });
-      const ws  = wb.Sheets[wb.SheetNames[0]];
-      const csv = XLSX.utils.sheet_to_csv(ws);
-      if (!csv.trim()) throw new Error('Excel file appears empty or could not be parsed.');
-      fileContent = [{ type:'text', text:'FILE CONTENT (Excel as CSV):\n' + csv }];
+      fileContent = [{ type:'document', source:{ type:'base64', media_type:'application/pdf', data:b64 } }];
     } else if (ext === 'docx' || ext === 'doc') {
-      // uploadedFileData is an ArrayBuffer from readAsArrayBuffer
       const result = await mammoth.extractRawText({ arrayBuffer: uploadedFileData });
       if (!result.value.trim()) throw new Error('Word document appears empty or could not be parsed.');
       fileContent = [{ type:'text', text:'FILE CONTENT (Word doc):\n' + result.value }];
     }
 
-    // ── Step 2: Pre-scan the file text for tickers to trim the scores payload ──
-    // Instead of dumping all 1,290 scores, extract only tickers likely in this file
-    // This dramatically reduces prompt size for large portfolios
     document.getElementById('az-status-sub').textContent = 'Preparing scoring data…';
-
     const fileText = fileContent.map(b => b.text || '').join(' ').toUpperCase();
     const knownScoresObj = {};
     for (const [ticker, score] of Object.entries({...TICKER_SCORES, ..._sessionScoreCache})) {
-      // Include ticker if it appears in the file text (with word boundary check)
       const re = new RegExp('\\b' + ticker.replace('.','[.]') + '\\b');
       if (re.test(fileText)) knownScoresObj[ticker] = score;
     }
-    // Always include common anchors for calibration context
-    const anchors = {SPY:74,QQQ:85,AGG:28,IWM:87,BND:25,TLT:35,VTI:75,GLD:65,IBIT:95};
-    Object.assign(knownScoresObj, anchors);
+    Object.assign(knownScoresObj, {SPY:74,QQQ:85,AGG:28,IWM:87,BND:25,TLT:35,VTI:75,GLD:65,IBIT:95});
     const knownScoresJSON = JSON.stringify(knownScoresObj);
-
-    // Pre-extract client first name(s) from account labels (e.g. "Carol - SWM IRA")
-    let clientNameHint = buildClientNameHint(fileContent);
-
+    const clientNameHint = buildClientNameHint(fileContent);
     const prompt = buildPortfolioPrompt(knownScoresJSON, clientNameHint);
 
-    // ── Step 3: API call with automatic retry on truncation ──
     document.getElementById('az-status-sub').textContent = 'Analyzing holdings…';
 
     async function callProxy(tokensLimit, attempt = 0) {
-      if (attempt > 0) await new Promise(r => setTimeout(r, 2000 * attempt));
+      if (attempt > 0) await new Promise(r => setTimeout(r, 3000 * attempt));
       const resp = await fetch('/api/proxy', {
         method: 'POST',
         headers: getApiHeaders(),
@@ -2154,8 +2396,8 @@ async function analyzePortfolio() {
         })
       });
       if (resp.status === 529 || resp.status === 500 || resp.status === 503) {
-        if (attempt >= 2) throw new Error('Server overloaded — please wait a moment and try again');
-        document.getElementById('az-status-sub').textContent = 'Server busy — retrying…';
+        if (attempt >= 3) throw new Error('Server overloaded — please wait a moment and try again');
+        document.getElementById('az-status-sub').textContent = `Server busy — retrying (${attempt+1}/3)…`;
         return callProxy(tokensLimit, attempt + 1);
       }
       if (!resp.ok) {
@@ -2168,26 +2410,20 @@ async function analyzePortfolio() {
     let data = await callProxy(8000);
     if (data.error) throw new Error(data.error.message || 'API returned an error');
 
-    // If truncated, retry with higher limit
     if (data.stop_reason === 'max_tokens') {
-      console.warn('Response truncated at 8000 tokens — retrying with 16000');
-      document.getElementById('az-status-sub').textContent = 'Large portfolio detected — retrying…';
+      document.getElementById('az-status-sub').textContent = 'Large document — retrying with higher limit…';
       data = await callProxy(16000);
       if (data.error) throw new Error(data.error.message || 'API returned an error');
     }
 
     document.getElementById('az-status-sub').textContent = 'Processing results…';
-
     const text  = (data.content || []).filter(b => b.type === 'text').map(b => b.text||'').join('');
     const clean = text.replace(/```json|```/g,'').trim();
     let parsed;
 
     function fixTruncatedJson(str) {
-      // Remove trailing incomplete key-value pairs
       let s = str.replace(/,\s*"[^"]*"\s*:\s*[^,\}\]]*$/, '');
-      // Remove trailing comma
       s = s.replace(/,\s*$/, '');
-      // Count open braces and brackets, close them
       let braces = 0, brackets = 0;
       for (const ch of s) {
         if (ch === '{') braces++;
@@ -2208,27 +2444,21 @@ async function analyzePortfolio() {
         try { parsed = JSON.parse(m[0]); }
         catch(e2) {
           try { parsed = JSON.parse(fixTruncatedJson(m[0])); }
-          catch(e3) { throw new Error('Could not parse portfolio data from response. Please try again.'); }
+          catch(e3) { throw new Error('Could not parse portfolio data. Please try again.'); }
         }
-      } else throw new Error('Could not parse portfolio data from response. Please try again.');
+      } else throw new Error('Could not parse portfolio data. Please try again.');
     }
 
-    // Support both new {accounts:[]} and old {holdings:[]} shapes
     const allHoldings = parsed?.accounts
       ? parsed.accounts.flatMap(a => a.holdings || [])
       : (parsed?.holdings || []);
 
-    if (!allHoldings.length) {
-      throw new Error("No holdings were found in the file. Please check the format and try again.");
-    }
+    if (!allHoldings.length) throw new Error('No holdings were found. Please check the format and try again.');
 
-    // Post-process: if AI returned 0 for all market_values in an account,
-    // try to recover them from the raw file text using ticker/value matching
     if (parsed.accounts) {
       parsed.accounts.forEach(acct => {
         const allZero = (acct.holdings||[]).every(h => !parseFloat(h.market_value));
         if (allZero) {
-          // Try extracting dollar amounts from file text near each ticker
           (acct.holdings||[]).forEach(h => {
             if (!h.ticker) return;
             const pattern = new RegExp(h.ticker + '[^\n]{0,80}?([0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]{1,2})?)');
@@ -2242,7 +2472,6 @@ async function analyzePortfolio() {
       });
     }
 
-    // Cache any newly scored tickers for this session
     allHoldings.forEach(h => {
       const t = (h.ticker||"").toUpperCase().trim();
       if (t && !TICKER_SCORES[t] && h.risk_score) cacheScore(t, Math.round(parseFloat(h.risk_score)));
@@ -2464,6 +2693,36 @@ function sortAccount(ai, col) {
   }
 }
 
+// ── Inline portfolio title editing ──
+function startEditPortfolioTitle() {
+  const el = document.getElementById('az-portfolio-title');
+  if (!el || el.querySelector('input')) return; // already editing
+  const current = el.firstChild ? el.firstChild.textContent.trim() : el.textContent.trim();
+  el.innerHTML = `
+    <input id="az-title-input" type="text" value="${current.replace(/"/g,'&quot;')}"
+      style="font-family:'Playfair Display',serif;font-size:1.3rem;font-weight:700;color:#fff;
+             background:rgba(255,255,255,.12);border:1.5px solid rgba(255,255,255,.35);
+             border-radius:6px;padding:2px 10px;outline:none;width:280px;max-width:90vw"
+      onblur="commitPortfolioTitle()"
+      onkeydown="if(event.key==='Enter')commitPortfolioTitle();if(event.key==='Escape')cancelPortfolioTitle('${current.replace(/'/g,"\\'")}')"
+    >`;
+  document.getElementById('az-title-input').focus();
+  document.getElementById('az-title-input').select();
+}
+
+function commitPortfolioTitle() {
+  const input = document.getElementById('az-title-input');
+  if (!input) return;
+  const val = input.value.trim() || 'Investment Portfolio';
+  const el  = document.getElementById('az-portfolio-title');
+  if (el) el.innerHTML = `${val}<span style="font-size:.65rem;opacity:.45;font-family:'Nunito Sans',sans-serif;font-weight:600;letter-spacing:.05em">✎</span>`;
+}
+
+function cancelPortfolioTitle(original) {
+  const el = document.getElementById('az-portfolio-title');
+  if (el) el.innerHTML = `${original}<span style="font-size:.65rem;opacity:.45;font-family:'Nunito Sans',sans-serif;font-weight:600;letter-spacing:.05em">✎</span>`;
+}
+
 // Format a raw portfolio name into a clean client-facing title.
 // Examples:
 //   "Freda - SWM Portfolio"              -> "Freda's Portfolio"
@@ -2548,7 +2807,7 @@ function renderPortfolio(data) {
     <div class="az-score-banner">
       <div style="flex:1;min-width:0">
         <div class="az-score-ey">AI-Powered Portfolio Risk Analysis</div>
-        <div class="az-score-title">${formatPortfolioTitle(data.portfolio_name)}</div>
+        <div class="az-score-title" id="az-portfolio-title" onclick="startEditPortfolioTitle()" title="Click to rename" style="cursor:pointer;display:inline-flex;align-items:center;gap:8px">${formatPortfolioTitle(data.portfolio_name)}<span style="font-size:.65rem;opacity:.45;font-family:'Nunito Sans',sans-serif;font-weight:600;letter-spacing:.05em">✎</span></div>
         <div class="az-bar-bg"><div class="az-bar-fill" id="az-bar" style="width:0%"></div></div>
         <div class="az-bar-cap"><span>Conservative (0)</span><span>Moderate (50)</span><span>Aggressive (100)</span></div>
       </div>
@@ -2649,9 +2908,45 @@ function renderPortfolio(data) {
   recalcPortfolio();
 }
 
+function buildAccountAllocHTML(holdings) {
+  // Tally asset buckets for a single account's holdings
+  let eq = 0, fi = 0, cash = 0, alt = 0, ann = 0, str = 0;
+  holdings.forEach(h => {
+    const mv    = parseFloat(h.market_value) || 0;
+    const score = parseFloat(h.risk_score)   || 50;
+    const t     = (h.type || '').toLowerCase();
+    if (t.includes('annuity'))                                                         ann  += mv;
+    else if (t.includes('structured note') || t.includes('buffer note') ||
+             t.includes('autocall')        || t.includes('barrier note') ||
+             t.includes('reverse convertible') || t.includes('principal protected'))   str  += mv;
+    else if (score <= 6 || t.includes('money market') ||
+             (t.includes('cash') && !t.includes('cash flow')))                         cash += mv;
+    else if (score <= 40 || t.includes('bond') || t.includes('fixed') ||
+             t.includes('municipal') || t.includes('securitized') ||
+             t.includes('income etf') || t.includes('income fund'))                    fi   += mv;
+    else if (t.includes('alt') || t.includes('commodity') || t.includes('real asset')) alt  += mv;
+    else                                                                                eq   += mv;
+  });
+  const total = eq + fi + cash + alt + ann + str || 1;
+  const pct   = n => (n / total * 100).toFixed(1);
+  const chips = [
+    { label: 'Equities',         val: eq,   color: '#2563a8', bg: '#e8f0fa' },
+    { label: 'Fixed Income',     val: fi,   color: '#1a6b4a', bg: '#e6f4ed' },
+    { label: 'Cash',             val: cash, color: '#6b7e96', bg: '#f0f2f5' },
+    { label: 'Annuities',        val: ann,  color: '#7c3aed', bg: '#f3eeff' },
+    { label: 'Structured Notes', val: str,  color: '#b45309', bg: '#fef3c7' },
+    { label: 'Alternatives',     val: alt,  color: '#0e7490', bg: '#e0f7fa' },
+  ].filter(c => c.val > 0).sort((a, b) => b.val - a.val);
+  if (!chips.length) return '';
+  return `<div class="acct-alloc-strip" style="display:flex;flex-wrap:wrap;gap:6px;padding:10px 16px 10px;border-bottom:1px solid var(--border);background:#fafbfc">
+    ${chips.map(c => `<span style="font-size:.68rem;font-weight:700;padding:4px 10px;border-radius:20px;background:${c.bg};color:${c.color};white-space:nowrap">${c.label} <span style="opacity:.8">${pct(c.val)}%</span></span>`).join('')}
+  </div>`;
+}
+
 function renderAccountBlock(acct, ai) {
   const id = 'acct-' + ai;
   const holdingsHtml = (acct.holdings || []).map((h, hi) => renderHoldingRow(h, ai, hi)).join('');
+  const allocStrip   = buildAccountAllocHTML(acct.holdings || []);
   return `
     <div class="holdings-card" id="${id}" style="margin-bottom:20px">
       <div class="hc-head">
@@ -2666,12 +2961,13 @@ function renderAccountBlock(acct, ai) {
           </div>
           <div>
             <div style="font-size:.6rem;color:var(--slate-lt);text-transform:uppercase;letter-spacing:.1em;margin-bottom:2px">Account Risk Score</div>
-            <div id="${id}-score" style="font-size:1.4rem;font-weight:700;color:var(--navy)">—</div>
+            <div id="${id}-score" class="acct-score-num" title="Click to override account risk score" onclick="openAccountScoreEdit(${ai})" style="font-size:1.4rem;font-weight:700;color:var(--navy);cursor:pointer;display:inline-flex;align-items:center;gap:5px">—<span style="font-size:.6rem;opacity:.35;font-weight:600">✎</span></div>
             <div id="${id}-level" style="font-size:.65rem;color:var(--slate)">—</div>
           </div>
           <button class="acct-del-btn" title="Remove this account" onclick="deleteAccount(${ai},event)">✕ Remove</button>
         </div>
       </div>
+      ${allocStrip}
       <table class="htable">
         <thead id="${id}-thead"><tr>
           <th data-sort="ticker" onclick="sortAccount(${ai},'ticker')" style="cursor:pointer;user-select:none;white-space:nowrap">Ticker<span class="sort-arrow"> ⇅</span></th>
@@ -2757,6 +3053,42 @@ function openRiskEdit(ai, hi, event) {
 
 // ── Re-render the entire accounts wrap from the current _portfolioAccounts state ──
 // Needed after any add/edit/delete that changes account or holding indices.
+// ── Manual account-level risk score override ──
+// Lets an advisor pin the displayed account score independently of the
+// weighted calculation — useful when Nitrogen shows a different value,
+// or when a non-traded holding (annuity, etc.) skews the computed score.
+function openAccountScoreEdit(ai) {
+  const acct = _portfolioAccounts[ai];
+  if (!acct) return;
+  const computed = document.getElementById('acct-' + ai + '-score');
+  const currentDisplay = acct._manualScoreOverride !== undefined
+    ? acct._manualScoreOverride
+    : (computed ? parseInt(computed.textContent) || 50 : 50);
+
+  const input = prompt(
+    `Override risk score for:\n"${acct.account_name || 'Account ' + (ai+1)}"\n\n` +
+    `The calculated score is based on the weighted average of all holdings.\n` +
+    `Enter a value between 0–100 to pin a custom score, or leave blank to reset to calculated:\n`,
+    acct._manualScoreOverride !== undefined ? acct._manualScoreOverride : ''
+  );
+
+  if (input === null) return; // cancelled
+  const trimmed = String(input).trim();
+
+  if (trimmed === '') {
+    // Reset to calculated
+    delete acct._manualScoreOverride;
+  } else {
+    const newScore = parseInt(trimmed, 10);
+    if (isNaN(newScore) || newScore < 0 || newScore > 100) {
+      alert('Please enter a whole number between 0 and 100, or leave blank to reset.');
+      return;
+    }
+    acct._manualScoreOverride = newScore;
+  }
+  recalcPortfolio();
+}
+
 function rerenderAccounts() {
   const wrap = document.getElementById('az-accounts-wrap');
   if (!wrap) return;
@@ -2963,15 +3295,44 @@ function recalcPortfolio() {
     const balanceEl = document.getElementById(id + '-balance');
     const effectEl  = document.getElementById(id + '-cash-effect');
 
-    if (scoreEl)   { scoreEl.textContent = acctScore; scoreEl.style.color = riskColor(acctScore); }
-    if (levelEl)   { levelEl.textContent = riskLevelLabel(acctScore); levelEl.style.color = riskColor(acctScore); }
+    // If the advisor has manually overridden the account score, use that instead
+    const displayScore = (acct._manualScoreOverride !== undefined) ? acct._manualScoreOverride : acctScore;
+    if (scoreEl) {
+      const overrideMark = acct._manualScoreOverride !== undefined
+        ? `<span style="font-size:.52rem;color:#d4820a;font-weight:700;font-family:'Nunito Sans',sans-serif;vertical-align:middle"> ✎</span>`
+        : `<span style="font-size:.6rem;opacity:.35;font-weight:600">✎</span>`;
+      scoreEl.innerHTML = `${displayScore}${overrideMark}`;
+      scoreEl.style.color = riskColor(displayScore);
+    }
+    if (levelEl)   { levelEl.textContent = riskLevelLabel(displayScore); levelEl.style.color = riskColor(displayScore); }
     const displayBalance = acctTotalValue > 0 ? acctTotalValue : cashAdded;
     if (balanceEl) { balanceEl.textContent = displayBalance !== 0 ? (displayBalance < 0 ? '(' + fmt$(Math.abs(displayBalance)) + ')' : fmt$(displayBalance)) : '—'; balanceEl.style.color = displayBalance < 0 ? 'var(--red)' : ''; }
     if (effectEl)  { effectEl.textContent = cashAdded > 0 ? '→ lowers account score' : cashAdded < 0 ? '⚠️ debit balance · raises account score' : ''; effectEl.style.color = cashAdded < 0 ? 'var(--red)' : 'var(--green)'; }
 
+    // ── Refresh per-account alloc strip ──
+    const card = document.getElementById(id);
+    if (card) {
+      const existingStrip = card.querySelector('.acct-alloc-strip');
+      const newStripHTML  = buildAccountAllocHTML(holdings);
+      if (existingStrip) {
+        existingStrip.outerHTML = newStripHTML.replace('<div ', '<div class="acct-alloc-strip" ');
+      } else {
+        const hcHead = card.querySelector('.hc-head');
+        if (hcHead && newStripHTML) {
+          hcHead.insertAdjacentHTML('afterend', newStripHTML.replace('<div ', '<div class="acct-alloc-strip" '));
+        }
+      }
+    }
+
     // ── Add to portfolio totals ──
-    portfolioTotalValue   += hasMV ? acctTotalValue : acctDenom;
-    portfolioWeightedScore += acctWeightedScore + cashAdded * 5;
+    // If account has a manual score override, use that for the overall weighted average
+    const acctValueForTotal = hasMV ? acctTotalValue : acctDenom;
+    portfolioTotalValue += acctValueForTotal;
+    if (acct._manualScoreOverride !== undefined) {
+      portfolioWeightedScore += acct._manualScoreOverride * acctValueForTotal;
+    } else {
+      portfolioWeightedScore += acctWeightedScore + cashAdded * 5;
+    }
   });
 
   const overallScore = portfolioTotalValue > 0
@@ -3766,6 +4127,7 @@ const STRESS_SCENARIOS = {
     duration: 'Multi-year environment',
     recovery: 'Variable — depends on policy response',
     description: 'A period of slow economic growth combined with persistent inflation. Erodes purchasing power, pressures both stocks and traditional bonds, while rewarding real assets and commodities.',
+    bull: false,
     impacts: {
       'US Large Cap Equity':       -30,
       'US Mid Cap':                -32,
@@ -3789,6 +4151,101 @@ const STRESS_SCENARIOS = {
       'Other':                     -22,
     },
     takeaway: 'Stagflation is the scenario most portfolios are least prepared for. Real assets, commodities, and short-duration instruments tend to hold up best. Fixed income and growth equities face the most pressure.'
+  },
+
+  // ── BULL MARKET SCENARIOS ──
+  'bull2013': {
+    label: 'Post-Crisis Bull (2013)',
+    period: 'Jan 2013 – Dec 2013',
+    duration: '12 months',
+    recovery: 'N/A — sustained bull run',
+    description: 'One of the strongest single-year equity rallies of the post-2008 recovery. The Federal Reserve\'s quantitative easing fueled broad risk-on appetite, with the S&P 500 returning over 32%.',
+    bull: true,
+    impacts: {
+      'US Large Cap Equity':       +32,
+      'US Mid Cap':                +34,
+      'US Small Cap':              +38,
+      'International Developed':   +23,
+      'Emerging Markets':          -5,
+      'Equity Income / Options':   +28,
+      'Balanced / Target Date':    +16,
+      'Investment Grade Bonds':    -2,
+      'US Treasuries':             -8,
+      'Municipal Bonds':           -3,
+      'High Yield Bonds':          +7,
+      'International Bonds':       -5,
+      'Cash & Money Market':       0,
+      'CDs':                       +1,
+      'Real Estate':               +2,
+      'Commodities & Real Assets': -8,
+      'Crypto / Digital Assets':   +5500,
+      'Structured Notes':          +12,
+      'Annuities':                 0,
+      'Other':                     +22,
+    },
+    takeaway: 'A powerful reminder of the cost of sitting on the sidelines. Equity-heavy portfolios thrived while bonds lagged. Diversified investors captured meaningful gains while still managing downside risk.'
+  },
+  'bull2017': {
+    label: 'Low-Vol Bull (2017)',
+    period: 'Jan 2017 – Dec 2017',
+    duration: '12 months',
+    recovery: 'N/A — sustained bull run',
+    description: 'An unusually calm and consistent rally — the S&P 500 gained over 21% with record-low volatility and not a single 3% pullback all year. International and emerging markets led the way.',
+    bull: true,
+    impacts: {
+      'US Large Cap Equity':       +22,
+      'US Mid Cap':                +18,
+      'US Small Cap':              +15,
+      'International Developed':   +25,
+      'Emerging Markets':          +37,
+      'Equity Income / Options':   +16,
+      'Balanced / Target Date':    +14,
+      'Investment Grade Bonds':    +4,
+      'US Treasuries':             +2,
+      'Municipal Bonds':           +5,
+      'High Yield Bonds':          +7,
+      'International Bonds':       +10,
+      'Cash & Money Market':       +1,
+      'CDs':                       +1,
+      'Real Estate':               +5,
+      'Commodities & Real Assets': +6,
+      'Crypto / Digital Assets':   +1400,
+      'Structured Notes':          +10,
+      'Annuities':                 0,
+      'Other':                     +16,
+    },
+    takeaway: 'Nearly every asset class delivered positive returns — a rare rising-tide environment. International diversification was particularly rewarded. Annuities and cash provided stability but lagged the broad market significantly.'
+  },
+  'bull2021': {
+    label: 'Post-COVID Boom (2021)',
+    period: 'Jan 2021 – Dec 2021',
+    duration: '12 months',
+    recovery: 'N/A — pandemic rebound bull run',
+    description: 'Fiscal stimulus, vaccine rollouts, and reopening euphoria drove one of the most powerful economic rebounds in history. Growth, tech, and crypto soared while supply chain pressures began building.',
+    bull: true,
+    impacts: {
+      'US Large Cap Equity':       +29,
+      'US Mid Cap':                +24,
+      'US Small Cap':              +15,
+      'International Developed':   +11,
+      'Emerging Markets':          -3,
+      'Equity Income / Options':   +26,
+      'Balanced / Target Date':    +13,
+      'Investment Grade Bonds':    -2,
+      'US Treasuries':             -3,
+      'Municipal Bonds':           +1,
+      'High Yield Bonds':          +5,
+      'International Bonds':       -2,
+      'Cash & Money Market':       0,
+      'CDs':                       0,
+      'Real Estate':               +43,
+      'Commodities & Real Assets': +27,
+      'Crypto / Digital Assets':   +60,
+      'Structured Notes':          +12,
+      'Annuities':                 0,
+      'Other':                     +20,
+    },
+    takeaway: 'A broad risk-on environment rewarded equities, real assets, and alternatives. Bonds were essentially flat to slightly negative as inflation expectations rose. Real estate and commodities were standout performers alongside equities.'
   }
 };
 
@@ -3815,7 +4272,7 @@ function switchScenario(key) {
   // Update tabs
   document.querySelectorAll('.st-tab').forEach(t => t.classList.remove('active'));
   const tabs = document.querySelectorAll('.st-tab');
-  const keys = ['2008','covid','2022','dotcom','stagflation','custom'];
+  const keys = ['2008','covid','2022','dotcom','stagflation','bull2013','bull2017','bull2021','custom'];
   const idx = keys.indexOf(key);
   if (tabs[idx]) tabs[idx].classList.add('active');
 
@@ -3872,54 +4329,76 @@ function renderScenario(key) {
   }
 
   const { totalMV, drawdownPct, dollarImpact, assetImpacts, scenario } = result;
+  const isBull = scenario.bull === true || drawdownPct > 0;
   const fmt$ = n => '$' + Math.abs(Math.round(n)).toLocaleString('en-US');
-  const drawdownColor = drawdownPct < -30 ? '#c0392b' : drawdownPct < -15 ? '#e67e22' : '#f39c12';
   const endValue = totalMV + dollarImpact;
+  const gainLossSign = dollarImpact >= 0 ? '+' : '−';
 
-  // Asset impact bars — max bar = largest absolute impact
-  const maxAbs = Math.max(...assetImpacts.map(a => Math.abs(a.impact)));
-  const barsHTML = assetImpacts.map(a => {
-    const barWidth = (Math.abs(a.impact) / maxAbs * 100).toFixed(1);
+  // Accent color flips for bull vs bear
+  const accentColor   = isBull ? '#16a34a' : '#c0392b';
+  const accentBg      = isBull ? '#e6f4ed' : '#fde8e8';
+  const scenarioBadge = isBull
+    ? `<span style="font-size:.58rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#16a34a;padding:3px 10px;background:#e6f4ed;border-radius:20px">📈 Bull Market</span>`
+    : `<span style="font-size:.58rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#c0392b;padding:3px 10px;background:#fde8e8;border-radius:20px">📉 Bear Market</span>`;
+
+  // Asset impact bars — max bar = largest absolute impact; skip absurd crypto outliers for scale
+  const cappedImpacts = assetImpacts.map(a => ({...a, impactForScale: Math.min(Math.abs(a.impact), 100)}));
+  const maxAbs = Math.max(...cappedImpacts.map(a => a.impactForScale), 1);
+  const barsHTML = assetImpacts.map((a, i) => {
+    const barWidth = (Math.min(Math.abs(a.impact), 100) / maxAbs * 100).toFixed(1);
     const barColor = a.impact >= 0 ? '#16a34a' : (a.impact > -20 ? '#e67e22' : '#c0392b');
     const sign = a.impact >= 0 ? '+' : '';
+    const displayPct = Math.abs(a.impact) > 999 ? sign + a.impact.toLocaleString() + '%' : sign + a.impact + '%';
     return `<div class="st-asset-row">
       <div class="st-asset-label">${a.cat}</div>
       <div class="st-asset-bar-bg">
         <div class="st-asset-bar-fill" style="width:0%;background:${barColor}" data-w="${barWidth}"></div>
       </div>
-      <div class="st-asset-pct ${a.impact >= 0 ? 'pos' : 'neg'}">${sign}${a.impact}%</div>
+      <div class="st-asset-pct ${a.impact >= 0 ? 'pos' : 'neg'}">${displayPct}</div>
     </div>`;
   }).join('');
 
+  const stat1Label = isBull ? 'Estimated Gain'        : 'Estimated Drawdown';
+  const stat1Value = isBull ? '+' + drawdownPct.toFixed(1) + '%' : drawdownPct.toFixed(1) + '%';
+  const stat1Class = isBull ? 'gain' : 'loss';
+  const stat2Label = isBull ? 'Estimated Dollar Gain'  : 'Estimated Dollar Loss';
+  const stat2Value = isBull ? '+' + fmt$(dollarImpact) : '−' + fmt$(dollarImpact);
+  const stat3Label = isBull ? 'Market Character'       : 'Historical Recovery';
+  const stat3Value = isBull ? scenario.duration        : scenario.recovery;
+  const stat3Sub   = isBull ? scenario.period          : 'for diversified portfolios';
+
   content.innerHTML = `
-    <div style="margin-bottom:18px">
-      <div style="font-size:.95rem;font-weight:700;color:var(--navy);font-family:'Playfair Display',serif;margin-bottom:4px">${scenario.label}</div>
-      <div style="font-size:.7rem;color:var(--slate)">${scenario.period} · ${scenario.duration}</div>
-      <div style="font-size:.75rem;color:var(--slate);margin-top:8px;line-height:1.6">${scenario.description}</div>
+    <div style="margin-bottom:18px;display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px">
+      <div>
+        <div style="font-size:.95rem;font-weight:700;color:var(--navy);font-family:'Playfair Display',serif;margin-bottom:4px">${scenario.label}</div>
+        <div style="font-size:.7rem;color:var(--slate)">${scenario.period} · ${scenario.duration}</div>
+      </div>
+      ${scenarioBadge}
     </div>
+    <div style="font-size:.75rem;color:var(--slate);margin-bottom:18px;line-height:1.6">${scenario.description}</div>
 
     <div class="st-scenario-header">
-      <div class="st-stat-card">
-        <div class="st-stat-label">Estimated Drawdown</div>
-        <div class="st-stat-value loss">${drawdownPct.toFixed(1)}%</div>
-        <div class="st-stat-sub">from current value</div>
+      <div class="st-stat-card" style="border-top:3px solid ${accentColor}">
+        <div class="st-stat-label">${stat1Label}</div>
+        <div class="st-stat-value ${stat1Class}">${stat1Value}</div>
+        <div class="st-stat-sub">vs. current value</div>
       </div>
-      <div class="st-stat-card">
-        <div class="st-stat-label">Estimated Dollar Loss</div>
-        <div class="st-stat-value loss">−${fmt$(dollarImpact)}</div>
+      <div class="st-stat-card" style="border-top:3px solid ${accentColor}">
+        <div class="st-stat-label">${stat2Label}</div>
+        <div class="st-stat-value ${stat1Class}">${stat2Value}</div>
         <div class="st-stat-sub">portfolio value → ${fmt$(endValue)}</div>
       </div>
-      <div class="st-stat-card">
-        <div class="st-stat-label">Historical Recovery</div>
-        <div class="st-stat-value recovery">${scenario.recovery}</div>
-        <div class="st-stat-sub">for diversified portfolios</div>
+      <div class="st-stat-card" style="border-top:3px solid var(--teal)">
+        <div class="st-stat-label">${stat3Label}</div>
+        <div class="st-stat-value recovery">${stat3Value}</div>
+        <div class="st-stat-sub">${stat3Sub}</div>
       </div>
     </div>
 
     <div style="font-size:.62rem;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--slate);margin-bottom:12px">Asset Class Impact</div>
     <div class="st-asset-grid">${barsHTML}</div>
 
-    <div class="st-takeaway"><strong>Key Takeaway:</strong> ${scenario.takeaway}</div>
+    <div class="st-takeaway" style="border-left:3px solid ${accentColor}"><strong>Key Takeaway:</strong> ${scenario.takeaway}</div>
     <div style="font-size:.6rem;color:var(--slate);margin-top:12px;line-height:1.5">* Estimates based on historical asset class index returns. Actual portfolio performance will vary. This analysis is for illustrative and advisory discussion purposes only and does not constitute investment advice.</div>
   `;
 
@@ -4782,6 +5261,7 @@ function classifyHolding(h) {
     combined.includes("variable annuity") || combined.includes("variable annuities") ||
     combined.includes("var annuity") ||
     type.includes("variable annuity") || type.includes("variable insurance") ||
+    type === "variable" ||   // eMoney exports "Variable" as the asset class for VAs
     // "variable" + "annuity" anywhere in name (handles "ABC Variable XYZ Annuity")
     (combined.includes("variable") && (combined.includes("annuity") || combined.includes("annuit"))) ||
     // VA subaccounts
@@ -4927,12 +5407,21 @@ const mammoth = {
     <div class="st-modal-body">
 
       <div class="st-tabs" id="st-tabs">
-        <div class="st-tab active" onclick="switchScenario('2008')">2008 Crisis</div>
-        <div class="st-tab" onclick="switchScenario('covid')">2020 COVID</div>
-        <div class="st-tab" onclick="switchScenario('2022')">2022 Rate Hike</div>
-        <div class="st-tab" onclick="switchScenario('dotcom')">Dot-com Bust</div>
-        <div class="st-tab" onclick="switchScenario('stagflation')">Stagflation</div>
-        <div class="st-tab" onclick="switchScenario('custom')">⚙️ Custom</div>
+        <div style="display:flex;align-items:center;gap:6px;width:100%;flex-wrap:wrap">
+          <span style="font-size:.58rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#c0392b;padding:3px 8px;background:#fde8e8;border-radius:20px;white-space:nowrap">📉 Bear Markets</span>
+          <div class="st-tab active" onclick="switchScenario('2008')">2008 Crisis</div>
+          <div class="st-tab" onclick="switchScenario('covid')">2020 COVID</div>
+          <div class="st-tab" onclick="switchScenario('2022')">2022 Rate Hike</div>
+          <div class="st-tab" onclick="switchScenario('dotcom')">Dot-com Bust</div>
+          <div class="st-tab" onclick="switchScenario('stagflation')">Stagflation</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;width:100%;flex-wrap:wrap;margin-top:4px">
+          <span style="font-size:.58rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#22a06b;padding:3px 8px;background:#e6f4ed;border-radius:20px;white-space:nowrap">📈 Bull Markets</span>
+          <div class="st-tab" onclick="switchScenario('bull2013')">2013 Post-Crisis</div>
+          <div class="st-tab" onclick="switchScenario('bull2017')">2017 Low-Vol</div>
+          <div class="st-tab" onclick="switchScenario('bull2021')">2021 Post-COVID</div>
+          <div class="st-tab" onclick="switchScenario('custom')">⚙️ Custom</div>
+        </div>
       </div>
 
       <div id="st-scenario-content"><!-- filled by JS --></div>
