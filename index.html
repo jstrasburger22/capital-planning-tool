@@ -2908,24 +2908,23 @@ function renderPortfolio(data) {
   recalcPortfolio();
 }
 
-function buildAccountAllocHTML(holdings) {
-  // Tally asset buckets for a single account's holdings
-  let eq = 0, fi = 0, cash = 0, alt = 0, ann = 0, str = 0;
+function buildAccountAllocHTML(holdings, cashAdded) {
+  let eq = 0, fi = 0, cash = cashAdded > 0 ? cashAdded : 0, alt = 0, ann = 0, str = 0;
   holdings.forEach(h => {
     const mv    = parseFloat(h.market_value) || 0;
     const score = parseFloat(h.risk_score)   || 50;
     const t     = (h.type || '').toLowerCase();
-    if (t.includes('annuity'))                                                         ann  += mv;
+    if (t.includes('annuity'))                                                          ann  += mv;
     else if (t.includes('structured note') || t.includes('buffer note') ||
              t.includes('autocall')        || t.includes('barrier note') ||
-             t.includes('reverse convertible') || t.includes('principal protected'))   str  += mv;
+             t.includes('reverse convertible') || t.includes('principal protected'))    str  += mv;
     else if (score <= 6 || t.includes('money market') ||
-             (t.includes('cash') && !t.includes('cash flow')))                         cash += mv;
+             (t.includes('cash') && !t.includes('cash flow')))                          cash += mv;
     else if (score <= 40 || t.includes('bond') || t.includes('fixed') ||
              t.includes('municipal') || t.includes('securitized') ||
-             t.includes('income etf') || t.includes('income fund'))                    fi   += mv;
-    else if (t.includes('alt') || t.includes('commodity') || t.includes('real asset')) alt  += mv;
-    else                                                                                eq   += mv;
+             t.includes('income etf') || t.includes('income fund'))                     fi   += mv;
+    else if (t.includes('alt') || t.includes('commodity') || t.includes('real asset'))  alt  += mv;
+    else                                                                                 eq   += mv;
   });
   const total = eq + fi + cash + alt + ann + str || 1;
   const pct   = n => (n / total * 100).toFixed(1);
@@ -2938,20 +2937,25 @@ function buildAccountAllocHTML(holdings) {
     { label: 'Alternatives',     val: alt,  color: '#0e7490', bg: '#e0f7fa' },
   ].filter(c => c.val > 0).sort((a, b) => b.val - a.val);
   if (!chips.length) return '';
-  return `<div class="acct-alloc-strip" style="display:flex;flex-wrap:wrap;gap:6px;padding:10px 16px 10px;border-bottom:1px solid var(--border);background:#fafbfc">
-    ${chips.map(c => `<span style="font-size:.68rem;font-weight:700;padding:4px 10px;border-radius:20px;background:${c.bg};color:${c.color};white-space:nowrap">${c.label} <span style="opacity:.8">${pct(c.val)}%</span></span>`).join('')}
-  </div>`;
+  return chips.map(c =>
+    `<span style="font-size:.68rem;font-weight:700;padding:4px 10px;border-radius:20px;background:${c.bg};color:${c.color};white-space:nowrap">${c.label} <span style="opacity:.8">${pct(c.val)}%</span></span>`
+  ).join('');
+}
 }
 
 function renderAccountBlock(acct, ai) {
   const id = 'acct-' + ai;
   const holdingsHtml = (acct.holdings || []).map((h, hi) => renderHoldingRow(h, ai, hi)).join('');
-  const allocStrip   = buildAccountAllocHTML(acct.holdings || []);
+  const cashAdded    = acct.cash_added || 0;
+  const allocChips   = buildAccountAllocHTML(acct.holdings || [], cashAdded);
+  const allocStrip   = allocChips
+    ? `<div id="${id}-alloc-strip" class="acct-alloc-strip" style="display:flex;flex-wrap:wrap;gap:6px;padding:10px 16px;border-bottom:1px solid var(--border);background:#fafbfc">${allocChips}</div>`
+    : `<div id="${id}-alloc-strip" class="acct-alloc-strip" style="display:none"></div>`;
   return `
     <div class="holdings-card" id="${id}" style="margin-bottom:20px">
       <div class="hc-head">
         <div>
-          <div class="hc-title">${acct.account_name || 'Account ' + (ai+1)}</div>
+          <div class="hc-title" id="${id}-title" onclick="startEditAccountTitle(${ai})" title="Click to rename account" style="cursor:pointer;display:inline-flex;align-items:center;gap:6px">${acct.account_name || 'Account ' + (ai+1)}<span style="font-size:.6rem;opacity:.3;font-weight:600">✎</span></div>
           <div class="hc-count" id="${id}-count">${(acct.holdings||[]).length} positions</div>
         </div>
         <div style="text-align:right;display:flex;gap:24px;align-items:flex-start">
@@ -3053,6 +3057,40 @@ function openRiskEdit(ai, hi, event) {
 
 // ── Re-render the entire accounts wrap from the current _portfolioAccounts state ──
 // Needed after any add/edit/delete that changes account or holding indices.
+// ── Inline account title editing ──
+function startEditAccountTitle(ai) {
+  const id  = 'acct-' + ai;
+  const el  = document.getElementById(id + '-title');
+  if (!el || el.querySelector('input')) return; // already editing
+  const acct   = _portfolioAccounts[ai];
+  const current = acct ? acct.account_name || ('Account ' + (ai + 1)) : ('Account ' + (ai + 1));
+  el.innerHTML = `<input id="${id}-title-input" type="text" value="${current.replace(/"/g,'&quot;')}"
+    style="font-family:'Nunito Sans',sans-serif;font-size:.95rem;font-weight:700;color:var(--navy);
+           background:#f4f6fa;border:1.5px solid var(--teal);border-radius:6px;
+           padding:3px 10px;outline:none;width:260px;max-width:80vw"
+    onblur="commitAccountTitle(${ai})"
+    onkeydown="if(event.key==='Enter')this.blur();if(event.key==='Escape')cancelAccountTitle(${ai},'${current.replace(/'/g,"\\'")}')"
+  >`;
+  const input = document.getElementById(id + '-title-input');
+  if (input) { input.focus(); input.select(); }
+}
+
+function commitAccountTitle(ai) {
+  const id    = 'acct-' + ai;
+  const input = document.getElementById(id + '-title-input');
+  if (!input) return;
+  const val = input.value.trim() || ('Account ' + (ai + 1));
+  if (_portfolioAccounts[ai]) _portfolioAccounts[ai].account_name = val;
+  const el = document.getElementById(id + '-title');
+  if (el) el.innerHTML = `${val}<span style="font-size:.6rem;opacity:.3;font-weight:600">✎</span>`;
+}
+
+function cancelAccountTitle(ai, original) {
+  const id = 'acct-' + ai;
+  const el = document.getElementById(id + '-title');
+  if (el) el.innerHTML = `${original}<span style="font-size:.6rem;opacity:.3;font-weight:600">✎</span>`;
+}
+
 // ── Manual account-level risk score override ──
 // Lets an advisor pin the displayed account score independently of the
 // weighted calculation — useful when Nitrogen shows a different value,
@@ -3310,17 +3348,15 @@ function recalcPortfolio() {
     if (effectEl)  { effectEl.textContent = cashAdded > 0 ? '→ lowers account score' : cashAdded < 0 ? '⚠️ debit balance · raises account score' : ''; effectEl.style.color = cashAdded < 0 ? 'var(--red)' : 'var(--green)'; }
 
     // ── Refresh per-account alloc strip ──
-    const card = document.getElementById(id);
-    if (card) {
-      const existingStrip = card.querySelector('.acct-alloc-strip');
-      const newStripHTML  = buildAccountAllocHTML(holdings);
-      if (existingStrip) {
-        existingStrip.outerHTML = newStripHTML.replace('<div ', '<div class="acct-alloc-strip" ');
+    const stripEl = document.getElementById(id + '-alloc-strip');
+    if (stripEl) {
+      const chips = buildAccountAllocHTML(holdings, cashAdded);
+      if (chips) {
+        stripEl.innerHTML = chips;
+        stripEl.style.display = 'flex';
       } else {
-        const hcHead = card.querySelector('.hc-head');
-        if (hcHead && newStripHTML) {
-          hcHead.insertAdjacentHTML('afterend', newStripHTML.replace('<div ', '<div class="acct-alloc-strip" '));
-        }
+        stripEl.innerHTML = '';
+        stripEl.style.display = 'none';
       }
     }
 
