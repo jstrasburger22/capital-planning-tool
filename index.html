@@ -2172,7 +2172,7 @@ function parseCSVLocally(csvText) {
       typeFinal = assetCls || '';
     }
 
-    accountMap[acctName].push({
+    const holding = {
       ticker,
       cusip,
       name: rawName,
@@ -2182,7 +2182,9 @@ function parseCSVLocally(csvText) {
       risk_score: score,    // null = unknown, filled by AI batch
       risk_level: score !== null ? riskLevelLabel(score) : 'Unknown',
       _needsScore: score === null,
-    });
+    };
+    applyHoldingOverride(holding);
+    accountMap[acctName].push(holding);
   }
 
   if (!accountOrder.length) return null;
@@ -2309,6 +2311,8 @@ Return ONLY a JSON array (no markdown), one entry per security in the same order
             // Only overwrite the name if the holding's current name looks like
             // a raw ticker or is blank — don't clobber a proper description
             if (name && (!h.name || h.name === ticker || h.name === h.ticker)) h.name = name;
+            // Final safety net — override stale names the AI may have returned
+            applyHoldingOverride(h);
             delete h._needsScore;
           }
         });
@@ -2490,6 +2494,8 @@ async function analyzePortfolio() {
     allHoldings.forEach(h => {
       const t = (h.ticker||"").toUpperCase().trim();
       if (t && !TICKER_SCORES[t] && h.risk_score) cacheScore(t, Math.round(parseFloat(h.risk_score)));
+      // Fix any stale names the AI returned for recently-reassigned tickers
+      applyHoldingOverride(h);
     });
 
     renderPortfolio(parsed);
@@ -2650,10 +2656,61 @@ async function searchStock() {
 
   try {
     const knownScore   = TICKER_SCORES[ticker] ?? _sessionScoreCache[ticker];
-    const securityType = classifyTickerType(ticker);
 
-    // ── FAST PATH: known ticker with cached score ──
-    // Still fetch name/description but lock the score
+    // ── LOCAL OVERRIDE PATH: tickers with known stale AI data ──
+    // Build the result entirely from local data — no API call needed or wanted.
+    const STOCK_OVERRIDES = {
+      SPCX: { name: 'SpaceX (Space Exploration Technologies Corp)', type: 'Large Cap Stock',
+        expense_ratio: 'N/A', dividend_yield: '0%', aum: '~$1.6T market cap',
+        description: 'SpaceX designs, manufactures, and launches rockets and spacecraft, operates the Starlink satellite internet network, and develops AI through its xAI/Grok platform. IPO\'d on Nasdaq on June 12, 2026 at $135/share — the largest IPO in history.',
+        analysis: 'SpaceX carries extreme volatility with a beta near 6 and daily price swings averaging 8%+. It is a single-stock concentration play on space infrastructure, satellite internet, and AI — appropriate only for aggressive growth allocations. The dual-class share structure gives public shareholders economic exposure but minimal voting rights.' },
+      PURR: { name: 'Hyperliquid Strategies Inc.', type: 'Small Cap Stock',
+        expense_ratio: 'N/A', dividend_yield: '0%', aum: 'Small cap',
+        description: 'Hyperliquid Strategies (Nasdaq: PURR) is a digital asset treasury company that accumulates and stakes HYPE, the native token of the Hyperliquid decentralized exchange blockchain. Incorporated in 2025, added to the Russell 2000 in 2026.',
+        analysis: 'PURR is a highly speculative, crypto-adjacent single stock whose value is directly tied to the price and staking yield of the HYPE token. It carries extreme volatility comparable to leveraged crypto ETFs. Suitable only for investors with a very high risk tolerance and a small position size within a diversified portfolio.' },
+      PUR:  { name: 'Defiance Daily Target 2X Long PURR ETF', type: 'Leveraged ETF',
+        expense_ratio: '~1.05%', dividend_yield: 'N/A', aum: 'Recent launch',
+        description: 'A 2x daily leveraged single-stock ETF seeking 200% of the daily performance of Hyperliquid Strategies (PURR). Launched July 8, 2026 by Defiance ETFs.',
+        analysis: 'This is a daily-reset leveraged ETF — it compounds decay over time and is designed for intraday or very short-term trading only, not buy-and-hold. The underlying PURR is already highly speculative; 2x leverage amplifies gains and losses dramatically. Suitable only for sophisticated short-term traders.' },
+      SPCU: { name: 'Defiance Daily Target 2X Long SpaceX ETF', type: 'Leveraged ETF',
+        expense_ratio: '~1.05%', dividend_yield: 'N/A', aum: 'Recent launch',
+        description: 'A 2x daily leveraged single-stock ETF seeking 200% of the daily performance of SpaceX (SPCX) by Defiance ETFs.',
+        analysis: 'Daily-reset 2x leveraged ETF on SpaceX — which itself has a beta near 6. Volatility decay makes this unsuitable for any holding period beyond a single trading session. Maximum speculative risk.' },
+      LOFF: { name: 'Direxion Daily SpaceX Bull 2X ETF', type: 'Leveraged ETF',
+        expense_ratio: '~1.07%', dividend_yield: 'N/A', aum: 'Recent launch',
+        description: 'A 2x daily leveraged ETF seeking 200% of the daily performance of SpaceX (SPCX) by Direxion.',
+        analysis: 'Daily-reset 2x leveraged ETF on SpaceX. Like all single-stock leveraged ETFs, it resets daily and compounds decay over time. Suitable only for sophisticated short-term traders with high risk tolerance.' },
+      CRWV: { name: 'CoreWeave Inc.', type: 'Large Cap Stock',
+        expense_ratio: 'N/A', dividend_yield: '0%', aum: '~$35B market cap',
+        description: 'CoreWeave is an AI-focused cloud computing company specializing in GPU infrastructure, primarily serving large AI model developers. IPO\'d in 2025.',
+        analysis: 'CoreWeave carries high single-stock risk due to heavy customer concentration (primarily NVDA ecosystem), deep losses on a GAAP basis, and massive ongoing capex requirements. Revenue growth is strong but profitability remains distant. High volatility; suitable for aggressive growth allocations only.' },
+      CRCL: { name: 'Circle Internet Group Inc.', type: 'Mid Cap Stock',
+        expense_ratio: 'N/A', dividend_yield: '0%', aum: 'Mid cap',
+        description: 'Circle Internet Group is the issuer of USDC, one of the largest US dollar stablecoins. IPO\'d June 2026, opening at $69 vs a $31 IPO price.',
+        analysis: 'Circle\'s business is directly tied to stablecoin adoption and the broader crypto regulatory environment. Revenue is driven by interest earned on USDC reserves, making it sensitive to interest rates. High volatility as a newly public crypto-adjacent stock.' },
+    };
+
+    const ov = STOCK_OVERRIDES[ticker];
+    if (ov) {
+      const score = knownScore !== undefined ? knownScore : (ov.defaultScore || 95);
+      cacheScore(ticker, score);
+      renderStockResult({
+        ticker,
+        name:           ov.name,
+        type:           ov.type,
+        risk_score:     score,
+        risk_level:     riskLevelLabel(score),
+        expense_ratio:  ov.expense_ratio,
+        dividend_yield: ov.dividend_yield,
+        aum:            ov.aum,
+        description:    ov.description,
+        analysis:       ov.analysis,
+      });
+      return;
+    }
+
+    // ── AI PATH: everything else ──
+    const securityType = classifyTickerType(ticker);
     const prompt = buildStockPrompt(ticker, securityType, knownScore);
 
     const resp = await fetch('/api/proxy', {
@@ -2825,6 +2882,7 @@ function renderPortfolio(data) {
   // Priority: 1) classifyHolding (annuity/note/bond/CD detection by name/type)
   //           2) TICKER_SCORES / session cache (known tickers)
   //           3) AI-returned score (fallback)
+  //           4) HOLDING_OVERRIDES — fixes stale names for reassigned tickers
   accounts = accounts.map(acct => ({
     ...acct,
     cash_added: 0,
@@ -2832,11 +2890,15 @@ function renderPortfolio(data) {
       const t = (h.ticker || '').toUpperCase().trim();
       const classified = classifyHolding(h);
       const mv = parseFloat(h.market_value) || 0;
+      let holding;
       if (classified) {
-        return { ...h, market_value: mv, risk_score: classified.score, type: classified.type };
+        holding = { ...h, market_value: mv, risk_score: classified.score, type: classified.type };
+      } else {
+        const local = TICKER_SCORES[t] || _sessionScoreCache[t];
+        holding = { ...h, market_value: mv, risk_score: local !== undefined ? local : (h.risk_score || 50) };
       }
-      const local = TICKER_SCORES[t] || _sessionScoreCache[t];
-      return { ...h, market_value: mv, risk_score: local !== undefined ? local : (h.risk_score || 50) };
+      applyHoldingOverride(holding);
+      return holding;
     })
   }));
 
@@ -4669,6 +4731,43 @@ function cacheScore(ticker, score) {
 function getCachedScore(ticker) {
   const t = ticker.toUpperCase();
   return _sessionScoreCache[t] !== undefined ? _sessionScoreCache[t] : null;
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// HOLDING_OVERRIDES — single source of truth for tickers whose names
+// were reassigned after the AI's training cutoff. Applied everywhere:
+// CSV parse, batch AI scoring, PDF/image AI path, and single-stock search.
+// Add new entries here and they automatically propagate to all paths.
+// ══════════════════════════════════════════════════════════════════════
+const HOLDING_OVERRIDES = {
+  SPCX: { name: 'SpaceX',                              type: 'Large Cap Stock'  },
+  PURR: { name: 'Hyperliquid Strategies Inc.',          type: 'Small Cap Stock'  },
+  PUR:  { name: 'Defiance 2X Long PURR ETF',            type: 'Leveraged ETF'    },
+  SPCU: { name: 'Defiance 2X Long SpaceX ETF',          type: 'Leveraged ETF'    },
+  LOFF: { name: 'Direxion Daily SpaceX Bull 2X ETF',    type: 'Leveraged ETF'    },
+  SPCF: { name: 'ProShares Ultra SpaceX ETF',           type: 'Leveraged ETF'    },
+  SSPC: { name: 'Leverage Shares 2x Short SPCX ETF',    type: 'Leveraged ETF'    },
+  SPCH: { name: 'Leverage Shares 2x Long SPCX ETF',     type: 'Leveraged ETF'    },
+  CRWV: { name: 'CoreWeave Inc.',                        type: 'Large Cap Stock'  },
+  CRCL: { name: 'Circle Internet Group Inc.',            type: 'Mid Cap Stock'    },
+  QNT:  { name: 'Quantinuum Inc.',                       type: 'Small Cap Stock'  },
+};
+
+// Apply HOLDING_OVERRIDES to a single holding object in-place.
+// Only overwrites name/type when the current name looks like a raw ticker
+// (blank, matches ticker symbol, or is a known stale label).
+const STALE_NAMES = new Set([
+  'THE ACQUIRERS FUND','ACQUIRERS FUND','ROUNDHILL CAT ETF','CAT ETF',
+  'SPAC AND NEW ISSUE ETF','THE SPAC AND NEW ISSUE ETF',
+]);
+function applyHoldingOverride(h) {
+  const t = (h.ticker || '').toUpperCase().trim();
+  if (!t || !HOLDING_OVERRIDES[t]) return;
+  const ov = HOLDING_OVERRIDES[t];
+  const curName = (h.name || '').trim().toUpperCase();
+  const isBlankOrRaw = !h.name || curName === t || curName === '' || STALE_NAMES.has(curName);
+  if (isBlankOrRaw) h.name = ov.name;
+  if (!h.type || STALE_NAMES.has(curName)) h.type = ov.type;
 }
 
 const TICKER_SCORES = {
