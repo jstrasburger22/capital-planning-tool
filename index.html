@@ -2250,8 +2250,19 @@ ETFs: Large blend 72-76, Growth 78-84, Small cap 84-88, Intl developed 74-78, EM
 Bonds: IG corp 28-34, HY 45-52, Short-term 15-22, Muni 20-26
 Cash/MM=5, Annuity=5, Variable Annuity=50, Structured Note=30, CD=5
 
+CRITICAL TICKER OVERRIDES — your training data may have outdated info on these tickers.
+Use ONLY the names and scores below, ignoring any prior knowledge:
+- SPCX = "SpaceX" (Space Exploration Technologies Corp, Nasdaq IPO June 12 2026, score 96, type "Large Cap Stock")
+- PURR = "Hyperliquid Strategies" (digital asset treasury / HYPE token, Nasdaq, founded 2025, score 97, type "Small Cap Stock") — NOT a cat or meme reference
+- PUR  = "Defiance 2X Long PURR ETF" (leveraged single-stock ETF on PURR, score 99)
+- CRWV = "CoreWeave" (AI GPU cloud, IPO 2025, score 96, type "Large Cap Stock")
+- CRCL = "Circle Internet Group" (USDC stablecoin, IPO June 2026, score 94, type "Mid Cap Stock")
+- QNT  = "Quantinuum" (quantum computing, IPO June 2026, score 95, type "Small Cap Stock")
+- SPCU = "Defiance 2X Long SpaceX ETF" (leveraged single-stock ETF, score 99)
+- LOFF = "Direxion Daily SpaceX Bull 2X ETF" (leveraged, score 99)
+
 Return ONLY a JSON array (no markdown), one entry per security in the same order:
-[{"ticker":"X","risk_score":74,"type":"Large Cap ETF"},...]`;
+[{"ticker":"X","risk_score":74,"type":"Large Cap ETF","name":"Full Security Name"},...]`;
 
     try {
       async function callBatchProxy(attempt = 0) {
@@ -2286,6 +2297,7 @@ Return ONLY a JSON array (no markdown), one entry per security in the same order
         const [ticker] = batch[i];
         const score = Math.round(parseFloat(s.risk_score) || 50);
         const type  = s.type || '';
+        const name  = s.name || '';
         // Cache it
         if (ticker && ticker !== '(none)') cacheScore(ticker, score);
         // Apply to ALL holdings with this ticker across all accounts
@@ -2294,6 +2306,9 @@ Return ONLY a JSON array (no markdown), one entry per security in the same order
             h.risk_score = score;
             h.risk_level = riskLevelLabel(score);
             if (type && !h.type) h.type = type;
+            // Only overwrite the name if the holding's current name looks like
+            // a raw ticker or is blank — don't clobber a proper description
+            if (name && (!h.name || h.name === ticker || h.name === h.ticker)) h.name = name;
             delete h._needsScore;
           }
         });
@@ -2493,6 +2508,16 @@ function buildPortfolioPrompt(knownScoresJSON, clientNameHint = '') {
   return `You are a financial risk analyst. Extract every holding from this portfolio document and assign each a Nitrogen (Riskalyze) 0-100 risk score.
 
 ${clientNameHint}For the portfolio_name: use the real client name only — never use "SWM", "LPL", account numbers, or generic terms like "Client Portfolio".
+
+CRITICAL TICKER OVERRIDES — your training data may be outdated on these. Use ONLY these values:
+- SPCX = "SpaceX" (Space Exploration Technologies Corp, Nasdaq, IPO June 12 2026, risk_score: 96, type: "Large Cap Stock") — NOT the old SPAC ETF
+- PURR = "Hyperliquid Strategies" (digital asset treasury / HYPE token, Nasdaq, founded 2025, risk_score: 97, type: "Small Cap Stock") — NOT a cat or meme reference
+- PUR  = "Defiance 2X Long PURR ETF" (leveraged single-stock ETF on PURR, risk_score: 99)
+- CRWV = "CoreWeave" (AI GPU cloud computing, IPO 2025, risk_score: 96, type: "Large Cap Stock")
+- CRCL = "Circle Internet Group" (USDC stablecoin issuer, IPO June 2026, risk_score: 94, type: "Mid Cap Stock")
+- QNT  = "Quantinuum" (quantum computing, IPO June 2026, risk_score: 95, type: "Small Cap Stock")
+- SPCU = "Defiance 2X Long SpaceX ETF" (leveraged, risk_score: 99)
+- LOFF = "Direxion Daily SpaceX Bull 2X ETF" (leveraged, risk_score: 99)
 
 KNOWN RISK SCORES (use these directly — do NOT web search these tickers):
 ${knownScoresJSON}
@@ -5191,6 +5216,73 @@ const TICKER_SCORES = {
   // ══════════════════════════════════════════════════════════════
   // 2025–2026 IPOs & RECENTLY ADDED TICKERS — Updated July 2026
   // ══════════════════════════════════════════════════════════════
+
+  // ══════════════════════════════════════════════════════════════
+  // JP MORGAN US TECHNOLOGY LEADERS SMA — Added July 2026
+  // Source: JPM US-Technology-Leaders-Holdings.pdf (as of June 30, 2026)
+  // ══════════════════════════════════════════════════════════════
+
+  // Automobiles & Components
+  RIVN:96,    // Rivian Automotive — EV startup, pre-profit, high vol
+
+  // Banks / Fintech
+  NU:90,      // Nu Holdings — Brazilian digital bank, EM + fintech risk
+
+  // Capital Goods / Industrials
+  SYM:95,     // Symbotic Inc — warehouse robotics/AI, high growth, volatile
+  ROK:76,     // Rockwell Automation — industrial automation, blue chip
+  VICR:88,    // Vicor Corp — power components, mid-cap, cyclical
+  // BE (Bloom Energy) already in table
+
+  // Consumer / Retail
+  WRBY:90,    // Warby Parker — direct-to-consumer eyewear, small-cap growth
+
+  // Financial Services
+  XYZ:92,     // Block Inc (formerly SQ) — fintech/crypto, high volatility
+  FIGR:90,    // Figure Technology Solutions — blockchain lending, speculative
+
+  // Insurance / Insurtech
+  LMND:94,    // Lemonade Inc — AI insurance, pre-profit, highly volatile
+
+  // Media & Entertainment
+  TTWO:88,    // Take-Two Interactive — gaming (GTA publisher), volatile
+
+  // Pharma / AI Health
+  TEM:94,     // Tempus AI — AI-driven oncology data, speculative
+
+  // Semiconductors
+  CBRS:96,    // Cerebras Systems — AI wafer-scale chips, IPO 2024, speculative
+  ENPH:92,    // Enphase Energy — solar microinverters, high vol
+  WOLF:94,    // Wolfspeed — silicon carbide chips, pre-profit, very volatile
+  MXL:88,     // MaxLinear — mixed-signal semiconductors, cyclical
+  ALGM:86,    // Allegro MicroSystems — automotive/industrial ICs
+  MTSI:88,    // MACOM Technology — RF/microwave semiconductors
+  AMKR:86,    // Amkor Technology — semiconductor packaging
+  ENTG:90,    // Entegris — semiconductor materials, high growth
+  GFS:84,     // GlobalFoundries — contract chipmaker (non-cutting-edge nodes)
+  TSM:88,     // Taiwan Semiconductor ADR — world's largest foundry, geopolitical risk
+  CDNS:88,    // Cadence Design Systems — EDA software, steady compounder
+
+  // Software & Services
+  SHOP:90,    // Shopify — e-commerce platform, high growth
+  ZM:82,      // Zoom Communications — video conferencing, post-COVID normalization
+  DOCN:90,    // DigitalOcean — cloud for SMBs, small-cap growth
+  TWLO:90,    // Twilio — cloud communications API, high growth
+  PANW:88,    // Palo Alto Networks — cybersecurity platform, large-cap growth
+
+  // Technology Hardware & Equipment
+  FN:84,      // Fabrinet — optical/electronic manufacturing services
+  TTMI:84,    // TTM Technologies — printed circuit boards, cyclical
+  LITE:88,    // Lumentum Holdings — optical/photonic components
+  CIEN:86,    // Ciena Corp — networking infrastructure
+  GLW:76,     // Corning Inc — specialty glass/fiber optics, blue chip
+  SNDK:84,    // SanDisk Corp — NAND flash storage (spun off from WDC)
+
+  // ── Hyperliquid Strategies (PURR) — Nasdaq, founded 2025 ──
+  // Digital asset treasury company; holds/stakes HYPE token. Crypto-adjacent, highly speculative.
+  // Added to Russell 2000/3000 June 2026. Leveraged ETF (PUR) launched July 8, 2026.
+  PURR:97,
+  PUR:99,    // Defiance Daily Target 2X Long PURR ETF (launched July 8, 2026)
 
   // ── SpaceX (SPCX) — IPO'd June 12, 2026 on Nasdaq at $135 ──
   // Beta ~5.79, daily volatility ~8.33%. Dual-class structure (Musk holds ~82% voting).
