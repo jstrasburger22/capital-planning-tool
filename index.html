@@ -2688,6 +2688,10 @@ async function searchStock() {
         expense_ratio: 'N/A', dividend_yield: '0%', aum: 'Mid cap',
         description: 'Circle Internet Group is the issuer of USDC, one of the largest US dollar stablecoins. IPO\'d June 2026, opening at $69 vs a $31 IPO price.',
         analysis: 'Circle\'s business is directly tied to stablecoin adoption and the broader crypto regulatory environment. Revenue is driven by interest earned on USDC reserves, making it sensitive to interest rates. High volatility as a newly public crypto-adjacent stock.' },
+      CBALX:{ name: 'Columbia Balanced Fund', type: 'Balanced Fund',
+        expense_ratio: '~0.97%', dividend_yield: 'Varies', aum: '~$5B',
+        description: 'Columbia Balanced Fund (CBALX) is an actively managed balanced mutual fund from Columbia Threadneedle Investments, blending equities and fixed income for moderate long-term growth.',
+        analysis: 'CBALX holds a typical 60/40-style blend of stocks and bonds, making it a moderate-risk option suitable for investors seeking growth with some downside cushion. The balanced allocation reduces volatility relative to a pure equity fund. Appropriate for moderate risk profiles in a core portfolio role.' },
     };
 
     const ov = STOCK_OVERRIDES[ticker];
@@ -4751,6 +4755,7 @@ const HOLDING_OVERRIDES = {
   CRWV: { name: 'CoreWeave Inc.',                        type: 'Large Cap Stock'  },
   CRCL: { name: 'Circle Internet Group Inc.',            type: 'Mid Cap Stock'    },
   QNT:  { name: 'Quantinuum Inc.',                       type: 'Small Cap Stock'  },
+  CBALX:{ name: 'Columbia Balanced Fund',               type: 'Balanced Fund'    },
 };
 
 // Apply HOLDING_OVERRIDES to a single holding object in-place.
@@ -4759,6 +4764,8 @@ const HOLDING_OVERRIDES = {
 const STALE_NAMES = new Set([
   'THE ACQUIRERS FUND','ACQUIRERS FUND','ROUNDHILL CAT ETF','CAT ETF',
   'SPAC AND NEW ISSUE ETF','THE SPAC AND NEW ISSUE ETF',
+  'CALVERT BALANCED FUND CLASS A','CALVERT BALANCED FUND',
+  'COLUMBIA BALANCED FUND CLASS A',
 ]);
 function applyHoldingOverride(h) {
   const t = (h.ticker || '').toUpperCase().trim();
