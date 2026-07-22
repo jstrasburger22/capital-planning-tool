@@ -2593,10 +2593,30 @@ function buildStockPrompt(ticker, securityType, knownScore) {
     ? `Use risk_score: ${knownScore} exactly — this is pre-verified. Just fill in the fund details.`
     : `Assign a Nitrogen (Riskalyze) risk score 0–100 based on the security's volatility and asset class.`;
 
+  // Tickers whose names/identities changed after the AI's training cutoff.
+  // These MUST override any web search result — the old ticker assignments no longer exist.
+  const TICKER_OVERRIDES = {
+    SPCX: { name: 'SpaceX (Space Exploration Technologies Corp)', type: 'Large Cap Stock', description: 'SpaceX designs, manufactures, and launches rockets and spacecraft, operates the Starlink satellite internet network, and develops AI through its xAI/Grok platform. IPO\'d on Nasdaq June 12, 2026 at $135/share — the largest IPO in history at a ~$1.75T valuation.' },
+    PURR: { name: 'Hyperliquid Strategies Inc.', type: 'Small Cap Stock', description: 'Hyperliquid Strategies (Nasdaq: PURR) is a digital asset treasury company focused on accumulating and staking HYPE, the native token of the Hyperliquid blockchain. Incorporated in 2025 and added to the Russell 2000 in 2026.' },
+    PUR:  { name: 'Defiance Daily Target 2X Long PURR ETF', type: 'Leveraged ETF', description: 'A 2x daily leveraged single-stock ETF seeking 200% of the daily performance of Hyperliquid Strategies (PURR). Launched July 8, 2026.' },
+    SPCU: { name: 'Defiance Daily Target 2X Long SpaceX ETF', type: 'Leveraged ETF', description: 'A 2x daily leveraged single-stock ETF seeking 200% of the daily performance of SpaceX (SPCX).' },
+    LOFF: { name: 'Direxion Daily SpaceX Bull 2X ETF', type: 'Leveraged ETF', description: 'A 2x daily leveraged ETF seeking 200% of the daily performance of SpaceX (SPCX).' },
+    CRWV: { name: 'CoreWeave Inc.', type: 'Large Cap Stock', description: 'CoreWeave is an AI-focused cloud computing company specializing in GPU infrastructure. IPO\'d in 2025.' },
+    CRCL: { name: 'Circle Internet Group Inc.', type: 'Mid Cap Stock', description: 'Circle Internet Group is the issuer of USDC, a leading US dollar stablecoin. IPO\'d June 2026.' },
+  };
+
+  const override = TICKER_OVERRIDES[ticker];
+  const overrideBlock = override
+    ? `\nCRITICAL OVERRIDE — Do NOT search the web for this ticker. Your training data and search results are outdated.
+Use EXACTLY these values for ${ticker}:
+  name: "${override.name}"
+  type: "${override.type}"
+  description: "${override.description}"\n`
+    : '';
+
   return `You are a financial risk analyst. ${typeHint}
-
-Search the web for: "${ticker}" fund OR ETF OR stock
-
+${overrideBlock}
+${override ? '' : `Search the web for: "${ticker}" fund OR ETF OR stock\n`}
 ${scoreInstruction}
 
 Nitrogen calibration reference:
@@ -2608,8 +2628,7 @@ Nitrogen calibration reference:
   · Large-cap growth / tech (AMZN, META, GOOGL): 88–92
   · High-volatility large-cap (NVDA, TSLA, AMD): 93–97
   · Speculative / high-growth / pre-profit single stocks: 93–98
-- ETF / mutual fund ranges (diversification lowers score vs. equivalent single stock):
-  · Large cap blend ETF: 72–76 | Large cap growth ETF: 78–84 | Small cap ETF: 84–88
+- ETF / mutual fund ranges (diversification lowers score vs. equivalent single stock):\n  · Large cap blend ETF: 72–76 | Large cap growth ETF: 78–84 | Small cap ETF: 84–88
   · International developed: 74–78 | Emerging markets: 80–84
   · High yield bond: 45–52 | Investment grade corp: 28–34
   · Balanced 60/40: ~55 | Short-term bond: 15–22 | Money market: 3–5
