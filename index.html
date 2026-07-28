@@ -5842,7 +5842,7 @@ const mammoth = {
     </div>
     <div class="aa-modal-body">
       <div class="aa-field-label">Select Model</div>
-      <select class="aa-input" id="pb-model-select" onchange="pbUpdateModelPreview()" style="margin-bottom:14px">
+      <select class="aa-input" id="pb-model-select" onchange="pbUpdateModelPreview(true)" style="margin-bottom:14px">
         <option value="">— Select a Capital Planning model —</option>
       </select>
 
@@ -8915,7 +8915,7 @@ function pbCloseModelModal() {
   document.getElementById('pb-model-overlay').style.display = 'none';
 }
 
-function pbUpdateModelPreview() {
+function pbUpdateModelPreview(resetSleeve) {
   const modelId = document.getElementById('pb-model-select').value;
   if (!modelId) {
     document.getElementById('pb-model-preview').style.display = 'none';
@@ -8925,14 +8925,20 @@ function pbUpdateModelPreview() {
   const model = CAPITAL_PLANNING_MODELS.find(m => m.id === modelId);
   if (!model) return;
 
-  // Populate sleeve selector if model has multiple sleeves
+  // Only repopulate the sleeve dropdown when the model itself changes (resetSleeve=true).
+  // When called from the sleeve onchange, preserve the user's selected index.
   const sleeveWrap = document.getElementById('pb-model-sleeve-wrap');
-  const sleeveSel = document.getElementById('pb-model-sleeve-select');
+  const sleeveSel  = document.getElementById('pb-model-sleeve-select');
   if (model.sleeves && model.sleeves.length > 1) {
-    sleeveSel.innerHTML = model.sleeves.map((sl, i) => `<option value="${i}">${sl.name}</option>`).join('');
+    if (resetSleeve || sleeveSel.dataset.modelId !== modelId) {
+      sleeveSel.innerHTML = model.sleeves.map((sl, i) => `<option value="${i}">${sl.name}</option>`).join('');
+      sleeveSel.value = '0';
+      sleeveSel.dataset.modelId = modelId;
+    }
     sleeveWrap.style.display = 'block';
   } else {
     sleeveWrap.style.display = 'none';
+    sleeveSel.dataset.modelId = modelId;
   }
   const sleeveIdx = (model.sleeves && model.sleeves.length > 1) ? (parseInt(sleeveSel.value)||0) : 0;
   const sleeve = (model.sleeves || [])[sleeveIdx];
