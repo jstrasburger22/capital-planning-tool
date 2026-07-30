@@ -528,6 +528,28 @@ body{font-family:'Nunito Sans',sans-serif;background:var(--cream);color:var(--te
 .st-takeaway{background:linear-gradient(135deg,#f0f4ff,#e8edf8);border-left:4px solid var(--navy);border-radius:0 10px 10px 0;padding:16px 20px;font-size:.8rem;line-height:1.7;color:var(--navy);}
 .st-takeaway strong{font-weight:700;}
 
+/* Income bridge / stability cushion */
+.st-bridge{margin-top:20px;background:linear-gradient(135deg,#eef8f2,#e9f3ee);border:1.5px solid #cfe6d8;border-radius:14px;padding:20px 22px;}
+.st-bridge-title{font-family:'Playfair Display',serif;font-size:.98rem;font-weight:700;color:#14432e;margin-bottom:4px;}
+.st-bridge-sub{font-size:.72rem;color:#3d6b52;margin-bottom:14px;line-height:1.6;}
+.st-bridge-stats{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:6px;}
+.st-bridge-stat{background:#fff;border-radius:10px;padding:12px 16px;text-align:center;border:1px solid #dcebe1;}
+.st-bridge-stat label{font-size:.56rem;font-weight:700;letter-spacing:.11em;text-transform:uppercase;color:#3d6b52;display:block;margin-bottom:4px;}
+.st-bridge-stat .v{font-family:'Playfair Display',serif;font-size:1.15rem;font-weight:700;color:#14432e;}
+.st-bridge-stat span{font-size:.6rem;color:#5a7d68;display:block;margin-top:2px;}
+.st-bridge-rows{font-size:.68rem;color:#3d6b52;margin:8px 2px 0;line-height:1.7;}
+.st-bridge-input-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:14px;padding-top:14px;border-top:1px dashed #cfe6d8;}
+.st-bridge-input-row label{font-size:.72rem;font-weight:700;color:#14432e;}
+.st-bridge-input-row input{width:130px;padding:9px 12px;border:1.5px solid #cfe6d8;border-radius:8px;font-size:.8rem;color:var(--navy);font-family:'Nunito Sans',sans-serif;}
+.st-bridge-input-row input:focus{outline:none;border-color:#1a6b4a;}
+.st-bridge-input-row select{padding:9px 10px;border:1.5px solid #cfe6d8;border-radius:8px;font-size:.75rem;color:var(--navy);font-family:'Nunito Sans',sans-serif;background:#fff;cursor:pointer;}
+.st-bridge-msg{margin-top:12px;border-radius:0 10px 10px 0;padding:14px 16px;font-size:.78rem;line-height:1.7;}
+.st-bridge-msg.ok{background:#e6f4ed;color:#14532d;border-left:4px solid #16a34a;}
+.st-bridge-msg.partial{background:#fdf3e3;color:#7c4a03;border-left:4px solid #e67e22;}
+.st-bridge-msg.info{background:#fff;color:var(--slate);border-left:4px solid #cfe6d8;}
+.st-bridge-msg strong{font-weight:700;}
+@media(max-width:580px){ .st-bridge-stats{grid-template-columns:1fr;} }
+
 /* Custom scenario */
 .st-custom-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px;}
 .st-custom-field label{font-size:.65rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--slate);display:block;margin-bottom:6px;}
@@ -4397,6 +4419,136 @@ const STRESS_SCENARIOS = {
 let _stActiveScenario = '2008';
 let _stCustomResult = null;
 
+// ── Income Bridge (stability cushion) ──
+const STABLE_CATEGORIES = [
+  'Cash & Money Market', 'CDs', 'US Treasuries', 'Investment Grade Bonds',
+  'Municipal Bonds', 'International Bonds', 'Annuities'
+];
+let _stDistAmount = '';      // persists across scenario tabs
+let _stDistFreq   = 'monthly';
+let _stBridgeData = null;    // computed per rendered scenario
+
+function parseRecoveryYears(scenario) {
+  if (!scenario || !scenario.recovery) return { years: null, label: null };
+  const m = scenario.recovery.match(/(\d+(?:\.\d+)?)\s*(year|month)/i);
+  if (!m) return { years: null, label: null };
+  const n = parseFloat(m[1]);
+  const isMonths = /month/i.test(m[2]);
+  return { years: isMonths ? n / 12 : n, label: isMonths ? n + ' months' : n + (n === 1 ? ' year' : ' years') };
+}
+
+function buildBridgeSection(assetImpacts, totalMV, scenario) {
+  const fmt$ = n => '$' + Math.abs(Math.round(n)).toLocaleString('en-US');
+  let stableNow = 0, stableStressed = 0;
+  const stableRows = [];
+  assetImpacts.forEach(a => {
+    if (STABLE_CATEGORIES.includes(a.cat)) {
+      const after = a.mv * (1 + a.impact / 100);
+      stableNow += a.mv;
+      stableStressed += after;
+      stableRows.push({ cat: a.cat, mv: a.mv, after });
+    }
+  });
+  const stablePct = totalMV > 0 ? (stableNow / totalMV * 100) : 0;
+  const rec = parseRecoveryYears(scenario);
+  _stBridgeData = { stableStressed, recoveryYears: rec.years, recoveryLabel: rec.label };
+
+  // No stable assets at all — turn it into the planning conversation
+  if (stableNow <= 0) {
+    _stBridgeData = null;
+    return `
+    <div class="st-bridge">
+      <div class="st-bridge-title">🛡️ The Calm Side of the Portfolio</div>
+      <div class="st-bridge-sub">Not everything falls in a downturn — cash, bonds, CDs, and annuities historically hold steady while stocks recover.</div>
+      <div class="st-bridge-msg partial">This portfolio currently holds <strong>no allocation to stable assets</strong> (cash, money market, bonds, CDs, or annuities). In a scenario like this, any income need would have to be met by selling investments at depressed prices. That is the strongest reason to carve out a stability sleeve now, while markets are calm — before the next downturn arrives.</div>
+    </div>`;
+  }
+
+  const rowsHTML = stableRows.sort((a,b) => b.mv - a.mv)
+    .map(r => `${r.cat}: ${fmt$(r.mv)} → est. ${fmt$(r.after)}`)
+    .join(' &nbsp;·&nbsp; ');
+
+  return `
+    <div class="st-bridge">
+      <div class="st-bridge-title">🛡️ The Calm Side of the Portfolio</div>
+      <div class="st-bridge-sub">Not everything falls in a downturn. Here is what stays steady in this scenario — and how long it could carry income needs on its own, without selling a single stock.</div>
+      <div class="st-bridge-stats">
+        <div class="st-bridge-stat">
+          <label>In Stable Assets Today</label>
+          <div class="v">${fmt$(stableNow)}</div>
+          <span>${stablePct.toFixed(0)}% of the portfolio</span>
+        </div>
+        <div class="st-bridge-stat">
+          <label>Est. Value in This Scenario</label>
+          <div class="v">${fmt$(stableStressed)}</div>
+          <span>cash · money market · bonds · CDs · annuities</span>
+        </div>
+      </div>
+      <div class="st-bridge-rows">${rowsHTML}</div>
+      <div class="st-bridge-input-row">
+        <label>💵 Client distributions:</label>
+        <span style="font-size:.78rem;color:#3d6b52;font-weight:600">$</span>
+        <input id="st-bridge-amt" type="number" step="100" min="0" placeholder="e.g. 4,000" value="${_stDistAmount}" oninput="updateStressBridge()">
+        <select id="st-bridge-freq" onchange="updateStressBridge()">
+          <option value="monthly" ${_stDistFreq === 'monthly' ? 'selected' : ''}>per month</option>
+          <option value="annual" ${_stDistFreq === 'annual' ? 'selected' : ''}>per year</option>
+        </select>
+      </div>
+      <div id="st-bridge-result"></div>
+    </div>`;
+}
+
+function updateStressBridge() {
+  const box = document.getElementById('st-bridge-result');
+  if (!box || !_stBridgeData) return;
+  const amtEl  = document.getElementById('st-bridge-amt');
+  const freqEl = document.getElementById('st-bridge-freq');
+  if (amtEl)  _stDistAmount = amtEl.value;
+  if (freqEl) _stDistFreq   = freqEl.value;
+
+  const fmt$ = n => '$' + Math.abs(Math.round(n)).toLocaleString('en-US');
+  const amt = parseFloat(_stDistAmount);
+  const { stableStressed, recoveryYears, recoveryLabel } = _stBridgeData;
+
+  if (!amt || amt <= 0) {
+    box.innerHTML = `<div class="st-bridge-msg info">Enter the client's regular distributions above to see how long their stable holdings alone could carry their income through a downturn like this.</div>`;
+    return;
+  }
+
+  const annual = _stDistFreq === 'monthly' ? amt * 12 : amt;
+  const years  = stableStressed / annual;
+  const yrsTxt = years >= 40 ? '40+ years' : (years >= 10 ? Math.round(years) + ' years' : years.toFixed(1) + ' years');
+  const monthsTxt = Math.round(years * 12);
+  let barHTML = '', cls, msg;
+
+  if (recoveryYears) {
+    const covPct = Math.min(years / recoveryYears * 100, 100);
+    barHTML = `
+      <div style="margin-top:14px">
+        <div style="display:flex;justify-content:space-between;gap:8px;font-size:.58rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#3d6b52;margin-bottom:5px;flex-wrap:wrap">
+          <span>Income covered by stable assets: ${yrsTxt}</span>
+          <span>Historical recovery: ~${recoveryLabel}</span>
+        </div>
+        <div style="height:12px;background:#d5e6da;border-radius:6px;overflow:hidden">
+          <div style="height:100%;width:${covPct.toFixed(0)}%;background:linear-gradient(90deg,#1a6b4a,#16a34a);border-radius:6px;transition:width .6s cubic-bezier(.4,0,.2,1)"></div>
+        </div>
+      </div>`;
+    if (years >= recoveryYears) {
+      cls = 'ok';
+      msg = `<strong>✓ Fully bridged.</strong> At ${fmt$(annual)} per year, the stable side of the portfolio alone could cover roughly <strong>${yrsTxt}</strong> of distributions — longer than the ~${recoveryLabel} it historically took markets to reach new highs after this event. In a downturn like this, income could come entirely from cash and bonds while the growth side is given the time it needs to recover. Nothing would have to be sold at depressed prices.`;
+    } else {
+      cls = 'partial';
+      msg = `At ${fmt$(annual)} per year, stable holdings could cover roughly <strong>${yrsTxt}</strong> of distributions (about ${monthsTxt} months) against a historical recovery of ~${recoveryLabel}. That is a meaningful head start — and a good reason to talk now, while markets are calm, about setting aside a bit more on the stable side so income never has to come from selling stocks at low prices.`;
+    }
+  } else {
+    cls = 'ok';
+    msg = `At ${fmt$(annual)} per year, the stable side of the portfolio alone could cover roughly <strong>${yrsTxt}</strong> of distributions — a real cushion that lets the rest of the portfolio ride out an extended downturn without being sold at the wrong time.`;
+  }
+
+  box.innerHTML = barHTML + `<div class="st-bridge-msg ${cls}">${msg}</div>`;
+}
+
+
 function openStressTest() {
   const overlay = document.getElementById('st-modal-overlay');
   if (!overlay) return;
@@ -4511,6 +4663,8 @@ function renderScenario(key) {
   const stat3Label = isBull ? 'Market Character'       : 'Historical Recovery';
   const stat3Value = isBull ? scenario.duration        : scenario.recovery;
   const stat3Sub   = isBull ? scenario.period          : 'for diversified portfolios';
+  const bridgeHTML = isBull ? '' : buildBridgeSection(assetImpacts, totalMV, scenario);
+  if (isBull) _stBridgeData = null;
 
   content.innerHTML = `
     <div style="margin-bottom:18px;display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px">
@@ -4544,6 +4698,7 @@ function renderScenario(key) {
     <div class="st-asset-grid">${barsHTML}</div>
 
     <div class="st-takeaway" style="border-left:3px solid ${accentColor}"><strong>Key Takeaway:</strong> ${scenario.takeaway}</div>
+    ${bridgeHTML}
     <div style="font-size:.6rem;color:var(--slate);margin-top:12px;line-height:1.5">* Estimates based on historical asset class index returns. Actual portfolio performance will vary. This analysis is for illustrative and advisory discussion purposes only and does not constitute investment advice.</div>
   `;
 
@@ -4553,6 +4708,7 @@ function renderScenario(key) {
       el.style.width = el.dataset.w + '%';
     });
   }, 60);
+  updateStressBridge();
 }
 
 function renderCustomScenario() {
@@ -4617,6 +4773,8 @@ function runCustomScenario() {
     </div>`;
   }).join('');
 
+  const customBridgeHTML = weightedDrawdown < 0 ? buildBridgeSection(assetImpacts, totalMV, null) : '';
+  if (weightedDrawdown >= 0) _stBridgeData = null;
   const result = document.getElementById('st-custom-result');
   result.innerHTML = `
     <div class="st-scenario-header" style="margin-bottom:20px">
@@ -4637,6 +4795,7 @@ function runCustomScenario() {
     </div>
     <div style="font-size:.62rem;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--slate);margin-bottom:12px">Asset Class Impact</div>
     <div class="st-asset-grid">${barsHTML}</div>
+    ${customBridgeHTML}
     <div style="font-size:.6rem;color:var(--slate);margin-top:12px;line-height:1.5">* Custom scenario using your defined inputs. For illustrative and advisory discussion purposes only.</div>
   `;
 
@@ -4645,6 +4804,7 @@ function runCustomScenario() {
       el.style.width = el.dataset.w + '%';
     });
   }, 60);
+  updateStressBridge();
 }
 
 
