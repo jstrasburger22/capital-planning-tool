@@ -912,7 +912,7 @@ body{font-family:'Nunito Sans',sans-serif;background:var(--cream);color:var(--te
       <div class="tc-feat"><div class="tc-feat-dot"></div>Upload image, PDF, Excel, CSV, or Word doc</div>
       <div class="tc-feat"><div class="tc-feat-dot"></div>Per-holding Nitrogen-style risk scores (0–100)</div>
       <div class="tc-feat"><div class="tc-feat-dot"></div>Asset allocation donut chart &amp; category breakdown</div>
-      <div class="tc-feat"><div class="tc-feat-dot"></div>Portfolio stress test · 5 historical scenarios</div>
+      <div class="tc-feat"><div class="tc-feat-dot"></div>Portfolio stress test · 8 historical scenarios</div>
       <div class="tc-feat"><div class="tc-feat-dot"></div>AI-drafted client email · single ticker lookup</div>
     </div>
     <button class="tc-btn tc-btn-advisor">Open Analyzer →</button>
@@ -1932,10 +1932,10 @@ ${exportBody}
           <div class="st-tab" onclick="switchScenario('covid')">2020 COVID</div>
           <div class="st-tab" onclick="switchScenario('2022')">2022 Rate Hike</div>
           <div class="st-tab" onclick="switchScenario('dotcom')">Dot-com Bust</div>
-          <div class="st-tab" onclick="switchScenario('stagflation')">Stagflation</div>
         </div>
         <div style="display:flex;align-items:center;gap:6px;width:100%;flex-wrap:wrap;margin-top:4px">
           <span style="font-size:.58rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#22a06b;padding:3px 8px;background:#e6f4ed;border-radius:20px;white-space:nowrap">📈 Bull Markets</span>
+          <div class="st-tab" onclick="switchScenario('bull2009')">2009 Rebound</div>
           <div class="st-tab" onclick="switchScenario('bull2013')">2013 Post-Crisis</div>
           <div class="st-tab" onclick="switchScenario('bull2017')">2017 Low-Vol</div>
           <div class="st-tab" onclick="switchScenario('bull2021')">2021 Post-COVID</div>
@@ -4288,39 +4288,38 @@ const STRESS_SCENARIOS = {
     },
     takeaway: 'A powerful reminder that diversification beyond equities matters enormously. Bonds and cash thrived as stocks collapsed. Portfolios balanced with fixed income would have navigated this period far more comfortably.'
   },
-  'stagflation': {
-    label: 'Stagflation Scenario',
-    period: '1970s analog / forward-looking',
-    duration: 'Multi-year environment',
-    recovery: 'Variable — depends on policy response',
-    description: 'A period of slow economic growth combined with persistent inflation. Erodes purchasing power, pressures both stocks and traditional bonds, while rewarding real assets and commodities.',
-    bull: false,
-    impacts: {
-      'US Large Cap Equity':       -30,
-      'US Mid Cap':                -32,
-      'US Small Cap':              -28,
-      'International Developed':   -25,
-      'Emerging Markets':          -20,
-      'Equity Income / Options':   -18,
-      'Balanced / Target Date':    -26,
-      'Investment Grade Bonds':    -22,
-      'US Treasuries':             -18,
-      'Municipal Bonds':           -20,
-      'High Yield Bonds':          -25,
-      'International Bonds':       -15,
-      'Cash & Money Market':       -3,
-      'CDs':                       +2,
-      'Real Estate':               +5,
-      'Commodities & Real Assets': +35,
-      'Crypto / Digital Assets':   -40,
-      'Structured Notes':          -10,
-      'Annuities':                 0,
-      'Other':                     -22,
-    },
-    takeaway: 'Stagflation is the scenario most portfolios are least prepared for. Real assets, commodities, and short-duration instruments tend to hold up best. Fixed income and growth equities face the most pressure.'
-  },
-
   // ── BULL MARKET SCENARIOS ──
+  'bull2009': {
+    label: '2009 Recovery Rally',
+    period: 'Jan 2009 – Dec 2009',
+    duration: '12 months',
+    recovery: 'N/A — the rebound year after 2008',
+    description: 'The other side of the 2008 story. After the March 2009 bottom, markets staged one of the most powerful rallies in history — the S&P 500 finished the year up over 26%, and more than 65% above its March low. Investors who stayed the course captured the recovery in full.',
+    bull: true,
+    impacts: {
+      'US Large Cap Equity':       +26,
+      'US Mid Cap':                +37,
+      'US Small Cap':              +27,
+      'International Developed':   +32,
+      'Emerging Markets':          +79,
+      'Equity Income / Options':   +20,
+      'Balanced / Target Date':    +20,
+      'Investment Grade Bonds':    +6,
+      'US Treasuries':             -4,
+      'Municipal Bonds':           +13,
+      'High Yield Bonds':          +58,
+      'International Bonds':       +7,
+      'Cash & Money Market':       0,
+      'CDs':                       +2,
+      'Real Estate':               +28,
+      'Commodities & Real Assets': +19,
+      'Crypto / Digital Assets':   0,
+      'Structured Notes':          +10,
+      'Annuities':                 0,
+      'Other':                     +22,
+    },
+    takeaway: 'The best days in the market tend to arrive when things feel worst. Investors who sold near the 2008 bottom locked in their losses and missed this rally entirely — those who stayed invested began recovering almost immediately. Pair this scenario with the 2008 stress test to show clients both halves of the story.'
+  },
   'bull2013': {
     label: 'Post-Crisis Bull (2013)',
     period: 'Jan 2013 – Dec 2013',
@@ -4439,19 +4438,17 @@ function parseRecoveryYears(scenario) {
 
 function buildBridgeSection(assetImpacts, totalMV, scenario) {
   const fmt$ = n => '$' + Math.abs(Math.round(n)).toLocaleString('en-US');
-  let stableNow = 0, stableStressed = 0;
+  let stableNow = 0;
   const stableRows = [];
   assetImpacts.forEach(a => {
     if (STABLE_CATEGORIES.includes(a.cat)) {
-      const after = a.mv * (1 + a.impact / 100);
       stableNow += a.mv;
-      stableStressed += after;
-      stableRows.push({ cat: a.cat, mv: a.mv, after });
+      stableRows.push({ cat: a.cat, mv: a.mv });
     }
   });
   const stablePct = totalMV > 0 ? (stableNow / totalMV * 100) : 0;
   const rec = parseRecoveryYears(scenario);
-  _stBridgeData = { stableStressed, recoveryYears: rec.years, recoveryLabel: rec.label };
+  _stBridgeData = { stableNow, recoveryYears: rec.years, recoveryLabel: rec.label };
 
   // No stable assets at all — turn it into the planning conversation
   if (stableNow <= 0) {
@@ -4464,32 +4461,25 @@ function buildBridgeSection(assetImpacts, totalMV, scenario) {
     </div>`;
   }
 
-  const stableGain = stableStressed - stableNow;
-  const stableRetPct = stableNow > 0 ? (stableGain / stableNow * 100) : 0;
-  const retSign = stableRetPct >= 0 ? '+' : '−';
-  const retClass = stableRetPct >= 0 ? 'gain' : 'loss';
-  const gainSign = stableGain >= 0 ? '+' : '−';
-  const accent = stableRetPct >= 0 ? '#16a34a' : '#e67e22';
-
   const rowsHTML = stableRows.sort((a,b) => b.mv - a.mv)
-    .map(r => `${r.cat}: ${fmt$(r.mv)} → est. ${fmt$(r.after)}`)
+    .map(r => `${r.cat}: ${fmt$(r.mv)}`)
     .join(' &nbsp;·&nbsp; ');
 
   return `
     <div class="st-bridge">
       <div class="st-bridge-title">🛡️ The Calm Side of the Portfolio</div>
-      <div class="st-bridge-sub">While the numbers above show the storm, this is the shelter: ${fmt$(stableNow)} (${stablePct.toFixed(0)}% of the portfolio) sits in stable assets — and here is how that side behaves in this same scenario.</div>
+      <div class="st-bridge-sub">While the numbers above show the storm, this is the shelter — the portion of the portfolio in stable assets, valued as-is with no growth assumed.</div>
 
       <div class="st-scenario-header" style="margin-bottom:14px">
-        <div class="st-stat-card" style="border-top:3px solid ${accent};background:#fff">
-          <div class="st-stat-label">Stable Side Return</div>
-          <div class="st-stat-value ${retClass}">${retSign}${Math.abs(stableRetPct).toFixed(1)}%</div>
-          <div class="st-stat-sub">on ${fmt$(stableNow)} in stable assets</div>
+        <div class="st-stat-card" style="border-top:3px solid #16a34a;background:#fff">
+          <div class="st-stat-label">Balance in Stable Assets</div>
+          <div class="st-stat-value neutral">${fmt$(stableNow)}</div>
+          <div class="st-stat-sub">cash · money market · bonds · CDs · annuities</div>
         </div>
-        <div class="st-stat-card" style="border-top:3px solid ${accent};background:#fff">
-          <div class="st-stat-label">Estimated Dollar ${stableGain >= 0 ? 'Gain' : 'Change'}</div>
-          <div class="st-stat-value ${retClass}">${gainSign}${fmt$(stableGain)}</div>
-          <div class="st-stat-sub">stable side → ${fmt$(stableStressed)}</div>
+        <div class="st-stat-card" style="border-top:3px solid #16a34a;background:#fff">
+          <div class="st-stat-label">% of Portfolio</div>
+          <div class="st-stat-value neutral">${stablePct.toFixed(0)}%</div>
+          <div class="st-stat-sub">held in stable assets</div>
         </div>
         <div class="st-stat-card" style="border-top:3px solid var(--teal);background:#fff">
           <div class="st-stat-label">Distribution Bridge</div>
@@ -4522,7 +4512,7 @@ function updateStressBridge() {
 
   const fmt$ = n => '$' + Math.abs(Math.round(n)).toLocaleString('en-US');
   const amt = parseFloat(_stDistAmount);
-  const { stableStressed, recoveryYears, recoveryLabel } = _stBridgeData;
+  const { stableNow, recoveryYears, recoveryLabel } = _stBridgeData;
   const yearsCard = document.getElementById('st-bridge-years');
   const yearsSub  = document.getElementById('st-bridge-years-sub');
 
@@ -4534,7 +4524,7 @@ function updateStressBridge() {
   }
 
   const annual = _stDistFreq === 'monthly' ? amt * 12 : amt;
-  const years  = stableStressed / annual;
+  const years  = stableNow / annual;
   const yrsTxt = years >= 40 ? '40+ yrs' : (years >= 10 ? Math.round(years) + ' yrs' : years.toFixed(1) + ' yrs');
   const yrsTxtLong = years >= 40 ? '40+ years' : (years >= 10 ? Math.round(years) + ' years' : years.toFixed(1) + ' years');
   const monthsTxt = Math.round(years * 12);
@@ -4558,14 +4548,14 @@ function updateStressBridge() {
       </div>`;
     if (years >= recoveryYears) {
       cls = 'ok';
-      msg = `<strong>✓ Fully bridged.</strong> At ${fmt$(annual)} per year, the stable side of the portfolio alone could cover roughly <strong>${yrsTxtLong}</strong> of distributions — longer than the ~${recoveryLabel} it historically took markets to reach new highs after this event. In a downturn like this, income could come entirely from cash and bonds while the growth side is given the time it needs to recover. Nothing would have to be sold at depressed prices.`;
+      msg = `<strong>✓ Fully bridged.</strong> At ${fmt$(annual)} per year, the stable side of the portfolio alone — assuming no growth at all — could cover roughly <strong>${yrsTxtLong}</strong> of distributions. That is longer than the ~${recoveryLabel} it historically took markets to reach new highs after this event. In a downturn like this, income could come entirely from stable assets while the growth side is given the time it needs to recover. Nothing would have to be sold at depressed prices.`;
     } else {
       cls = 'partial';
-      msg = `At ${fmt$(annual)} per year, stable holdings could cover roughly <strong>${yrsTxtLong}</strong> of distributions (about ${monthsTxt} months) against a historical recovery of ~${recoveryLabel}. That is a meaningful head start — and a good reason to talk now, while markets are calm, about setting aside a bit more on the stable side so income never has to come from selling stocks at low prices.`;
+      msg = `At ${fmt$(annual)} per year, stable holdings could cover roughly <strong>${yrsTxtLong}</strong> of distributions (about ${monthsTxt} months) against a historical recovery of ~${recoveryLabel} — assuming no growth at all on those assets. That is a meaningful head start, and a good reason to talk now, while markets are calm, about setting aside a bit more on the stable side so income never has to come from selling stocks at low prices.`;
     }
   } else {
     cls = 'ok';
-    msg = `At ${fmt$(annual)} per year, the stable side of the portfolio alone could cover roughly <strong>${yrsTxtLong}</strong> of distributions — a real cushion that lets the rest of the portfolio ride out an extended downturn without being sold at the wrong time.`;
+    msg = `At ${fmt$(annual)} per year, the stable side of the portfolio alone — assuming no growth at all — could cover roughly <strong>${yrsTxtLong}</strong> of distributions, a real cushion that lets the rest of the portfolio ride out an extended downturn without being sold at the wrong time.`;
   }
 
   box.innerHTML = barHTML + `<div class="st-bridge-msg ${cls}">${msg}</div>`;
@@ -4591,7 +4581,7 @@ function switchScenario(key) {
   // Update tabs
   document.querySelectorAll('.st-tab').forEach(t => t.classList.remove('active'));
   const tabs = document.querySelectorAll('.st-tab');
-  const keys = ['2008','covid','2022','dotcom','stagflation','bull2013','bull2017','bull2021','custom'];
+  const keys = ['2008','covid','2022','dotcom','bull2009','bull2013','bull2017','bull2021','custom'];
   const idx = keys.indexOf(key);
   if (tabs[idx]) tabs[idx].classList.add('active');
 
@@ -5917,10 +5907,10 @@ const mammoth = {
           <div class="st-tab" onclick="switchScenario('covid')">2020 COVID</div>
           <div class="st-tab" onclick="switchScenario('2022')">2022 Rate Hike</div>
           <div class="st-tab" onclick="switchScenario('dotcom')">Dot-com Bust</div>
-          <div class="st-tab" onclick="switchScenario('stagflation')">Stagflation</div>
         </div>
         <div style="display:flex;align-items:center;gap:6px;width:100%;flex-wrap:wrap;margin-top:4px">
           <span style="font-size:.58rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#22a06b;padding:3px 8px;background:#e6f4ed;border-radius:20px;white-space:nowrap">📈 Bull Markets</span>
+          <div class="st-tab" onclick="switchScenario('bull2009')">2009 Rebound</div>
           <div class="st-tab" onclick="switchScenario('bull2013')">2013 Post-Crisis</div>
           <div class="st-tab" onclick="switchScenario('bull2017')">2017 Low-Vol</div>
           <div class="st-tab" onclick="switchScenario('bull2021')">2021 Post-COVID</div>
