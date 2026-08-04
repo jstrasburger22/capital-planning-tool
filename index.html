@@ -493,6 +493,8 @@ body{font-family:'Nunito Sans',sans-serif;background:var(--cream);color:var(--te
 .st-modal-sub{font-size:.65rem;color:rgba(255,255,255,.5);margin-top:3px;letter-spacing:.05em;}
 .st-modal-close{background:rgba(255,255,255,.12);border:none;color:#fff;width:32px;height:32px;border-radius:50%;font-size:1rem;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background .15s;}
 .st-modal-close:hover{background:rgba(255,255,255,.25);}
+.st-print-btn{background:rgba(255,255,255,.12);border:1.5px solid rgba(255,255,255,.25);color:#fff;border-radius:999px;padding:8px 16px;font-size:.68rem;font-weight:700;cursor:pointer;font-family:'Nunito Sans',sans-serif;transition:all .15s;white-space:nowrap;}
+.st-print-btn:hover{background:var(--gold);border-color:var(--gold);color:var(--navy);}
 .st-modal-body{overflow-y:auto;padding:24px 28px;flex:1;}
 
 /* Scenario tabs */
@@ -1921,7 +1923,10 @@ ${exportBody}
         <div class="st-modal-title">⚡ Portfolio Stress Test</div>
         <div class="st-modal-sub">Estimated impact based on historical asset class behavior · For advisor discussion only</div>
       </div>
-      <button class="st-modal-close" onclick="closeStressTest()">✕</button>
+      <div style="display:flex;align-items:center;gap:10px">
+        <button class="st-print-btn" id="st-print-btn" onclick="exportStressTest(this)">📄 Save as PDF / Print</button>
+        <button class="st-modal-close" onclick="closeStressTest()">✕</button>
+      </div>
     </div>
     <div class="st-modal-body">
 
@@ -4561,6 +4566,129 @@ function updateStressBridge() {
   box.innerHTML = barHTML + `<div class="st-bridge-msg ${cls}">${msg}</div>`;
 }
 
+function exportStressTest(btn) {
+  const contentEl = document.getElementById('st-scenario-content');
+  if (!contentEl || !contentEl.innerHTML.trim()) return;
+  if (btn) btn.innerHTML = '⏳ Opening...';
+
+  const scenario = _stActiveScenario === 'custom' ? null : STRESS_SCENARIOS[_stActiveScenario];
+  const scenarioLabel = scenario ? scenario.label : 'Custom Scenario';
+
+  // Clone the rendered scenario and strip interactive elements for print
+  const clone = contentEl.cloneNode(true);
+  clone.querySelectorAll('.st-bridge-input-row, .st-bridge-msg.info, .st-custom-grid, .st-run-btn').forEach(el => el.remove());
+  if (_stActiveScenario === 'custom') {
+    const first = clone.firstElementChild;
+    if (first && !first.id && !first.className) first.remove(); // instruction text
+  }
+  // Static distribution line in place of the input row
+  const amt = parseFloat(_stDistAmount);
+  const bridge = clone.querySelector('.st-bridge');
+  const resultDiv = clone.querySelector('#st-bridge-result');
+  if (amt > 0 && bridge && resultDiv) {
+    const line = document.createElement('div');
+    line.style.cssText = 'margin-top:14px;padding-top:12px;border-top:1px dashed #cfe6d8;font-size:.75rem;font-weight:700;color:#14432e';
+    line.textContent = '💵 Client distributions: $' + Math.round(amt).toLocaleString('en-US') + (_stDistFreq === 'monthly' ? ' per month' : ' per year');
+    bridge.insertBefore(line, resultDiv);
+  }
+  clone.querySelectorAll('.st-asset-bar-fill').forEach(el => { el.style.transition = 'none'; });
+
+  // Resolve CSS variables to literal values (same palette as the main export)
+  const allCSS = Array.from(document.querySelectorAll('style')).map(s => s.textContent).join('\n');
+  const resolvedCSS = allCSS
+    .replace(/var\(--navy-panel\)/g,  '#141e28')
+    .replace(/var\(--navy-mid\)/g,    '#202e3b')
+    .replace(/var\(--navy-light\)/g,  '#2d3f4f')
+    .replace(/var\(--navy\)/g,        '#1b2b3a')
+    .replace(/var\(--gold-light\)/g,  '#dbb97a')
+    .replace(/var\(--gold-pale\)/g,   '#f5eed8')
+    .replace(/var\(--gold\)/g,        '#cda561')
+    .replace(/var\(--cream\)/g,       '#f9f7f3')
+    .replace(/var\(--white\)/g,       '#ffffff')
+    .replace(/var\(--slate-lt\)/g,    '#a8b8cc')
+    .replace(/var\(--slate\)/g,       '#6b7e96')
+    .replace(/var\(--green-pale\)/g,  '#e6f4ed')
+    .replace(/var\(--green\)/g,       '#1d7a50')
+    .replace(/var\(--blue-pale\)/g,   '#e8f0fa')
+    .replace(/var\(--blue\)/g,        '#2563a8')
+    .replace(/var\(--amber\)/g,       '#d4820a')
+    .replace(/var\(--red\)/g,         '#c0392b')
+    .replace(/var\(--border-dark\)/g, 'rgba(255,255,255,.1)')
+    .replace(/var\(--border\)/g,      '#dde4ef')
+    .replace(/var\(--text\)/g,        '#1a2a3a');
+
+  const fontLink = document.querySelector('link[href*="fonts.googleapis"]');
+  const fontTag  = fontLink ? fontLink.outerHTML : '';
+  const date = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+  const subLine = scenario ? scenario.period + ' · ' + scenario.duration : 'Advisor-defined assumptions';
+
+  const doc = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Portfolio Stress Test — ${scenarioLabel}</title>
+${fontTag}
+<style>${resolvedCSS}</style>
+<style>
+  html, body { background:#ffffff !important; margin:0; }
+  body { padding:36px 44px; font-family:'Nunito Sans', sans-serif; max-width:840px; margin:0 auto; }
+  .stx-letterhead { display:flex; justify-content:space-between; align-items:flex-end; border-bottom:3px solid #1b2b3a; padding-bottom:14px; margin-bottom:8px; }
+  .stx-firm { font-family:'Playfair Display', serif; font-size:1.25rem; font-weight:700; color:#1b2b3a; }
+  .stx-firm-sub { font-size:.6rem; letter-spacing:.14em; text-transform:uppercase; color:#cda561; font-weight:700; margin-top:2px; }
+  .stx-date { font-size:.68rem; color:#6b7e96; text-align:right; }
+  .stx-title-block { margin:18px 0 20px; }
+  .stx-doc-title { font-family:'Playfair Display', serif; font-size:1.5rem; font-weight:700; color:#1b2b3a; }
+  .stx-doc-sub { font-size:.72rem; color:#6b7e96; margin-top:4px; }
+  .stx-footer { margin-top:28px; border-top:1px solid #dde4ef; padding-top:14px; font-size:.6rem; color:#6b7e96; line-height:1.7; }
+  .st-asset-bar-fill { transition:none !important; }
+  @media print {
+    body { padding:0; }
+    * { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+    .st-bridge, .st-takeaway, .st-scenario-header { break-inside:avoid; }
+  }
+</style>
+</head>
+<body>
+  <div class="stx-letterhead">
+    <div>
+      <div class="stx-firm">Capital Planning Wealth Management</div>
+      <div class="stx-firm-sub">Portfolio Stress Test</div>
+    </div>
+    <div class="stx-date">Prepared ${date}</div>
+  </div>
+  <div class="stx-title-block">
+    <div class="stx-doc-title">${scenarioLabel}</div>
+    <div class="stx-doc-sub">${subLine}</div>
+  </div>
+  ${clone.innerHTML}
+  <div class="stx-footer">
+    <strong>Disclosure:</strong> This stress test is for illustrative and advisory discussion purposes only. Estimates are based on historical asset class index returns; actual portfolio performance will vary. It does not constitute a formal suitability determination, investment advice, or a guarantee of future results. Securities and advisory services offered through LPL Financial, Member FINRA/SIPC. Capital Planning Wealth Management and LPL Financial are separate entities.
+  </div>
+  <script>window.addEventListener('load', function(){ setTimeout(function(){ window.print(); }, 450); });<\/script>
+</body>
+</html>`;
+
+  try {
+    const blob = new Blob([doc], { type: 'text/html;charset=utf-8' });
+    const url  = URL.createObjectURL(blob);
+    const tab  = window.open(url, '_blank');
+    if (tab) {
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+      if (btn) btn.innerHTML = '✓ Print dialog opened';
+    } else {
+      // Popup blocked — download as HTML instead
+      const a = document.createElement('a');
+      a.href = url; a.download = 'Stress-Test-' + scenarioLabel.replace(/[^a-zA-Z0-9]+/g, '-') + '.html';
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      if (btn) btn.innerHTML = '✓ Downloaded — open & print';
+    }
+  } catch (e) {
+    alert('Please allow popups for this page and try again.');
+  }
+  setTimeout(() => { if (btn) btn.innerHTML = '📄 Save as PDF / Print'; }, 4000);
+}
+
 function openStressTest() {
   const overlay = document.getElementById('st-modal-overlay');
   if (!overlay) return;
@@ -5896,7 +6024,10 @@ const mammoth = {
         <div class="st-modal-title">⚡ Portfolio Stress Test</div>
         <div class="st-modal-sub">Estimated impact based on historical asset class behavior · For advisor discussion only</div>
       </div>
-      <button class="st-modal-close" onclick="closeStressTest()">✕</button>
+      <div style="display:flex;align-items:center;gap:10px">
+        <button class="st-print-btn" id="st-print-btn" onclick="exportStressTest(this)">📄 Save as PDF / Print</button>
+        <button class="st-modal-close" onclick="closeStressTest()">✕</button>
+      </div>
     </div>
     <div class="st-modal-body">
 
