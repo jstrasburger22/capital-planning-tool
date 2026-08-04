@@ -4464,6 +4464,13 @@ function buildBridgeSection(assetImpacts, totalMV, scenario) {
     </div>`;
   }
 
+  const stableGain = stableStressed - stableNow;
+  const stableRetPct = stableNow > 0 ? (stableGain / stableNow * 100) : 0;
+  const retSign = stableRetPct >= 0 ? '+' : '−';
+  const retClass = stableRetPct >= 0 ? 'gain' : 'loss';
+  const gainSign = stableGain >= 0 ? '+' : '−';
+  const accent = stableRetPct >= 0 ? '#16a34a' : '#e67e22';
+
   const rowsHTML = stableRows.sort((a,b) => b.mv - a.mv)
     .map(r => `${r.cat}: ${fmt$(r.mv)} → est. ${fmt$(r.after)}`)
     .join(' &nbsp;·&nbsp; ');
@@ -4471,19 +4478,26 @@ function buildBridgeSection(assetImpacts, totalMV, scenario) {
   return `
     <div class="st-bridge">
       <div class="st-bridge-title">🛡️ The Calm Side of the Portfolio</div>
-      <div class="st-bridge-sub">Not everything falls in a downturn. Here is what stays steady in this scenario — and how long it could carry income needs on its own, without selling a single stock.</div>
-      <div class="st-bridge-stats">
-        <div class="st-bridge-stat">
-          <label>In Stable Assets Today</label>
-          <div class="v">${fmt$(stableNow)}</div>
-          <span>${stablePct.toFixed(0)}% of the portfolio</span>
+      <div class="st-bridge-sub">While the numbers above show the storm, this is the shelter: ${fmt$(stableNow)} (${stablePct.toFixed(0)}% of the portfolio) sits in stable assets — and here is how that side behaves in this same scenario.</div>
+
+      <div class="st-scenario-header" style="margin-bottom:14px">
+        <div class="st-stat-card" style="border-top:3px solid ${accent};background:#fff">
+          <div class="st-stat-label">Stable Side Return</div>
+          <div class="st-stat-value ${retClass}">${retSign}${Math.abs(stableRetPct).toFixed(1)}%</div>
+          <div class="st-stat-sub">on ${fmt$(stableNow)} in stable assets</div>
         </div>
-        <div class="st-bridge-stat">
-          <label>Est. Value in This Scenario</label>
-          <div class="v">${fmt$(stableStressed)}</div>
-          <span>cash · money market · bonds · CDs · annuities</span>
+        <div class="st-stat-card" style="border-top:3px solid ${accent};background:#fff">
+          <div class="st-stat-label">Estimated Dollar ${stableGain >= 0 ? 'Gain' : 'Change'}</div>
+          <div class="st-stat-value ${retClass}">${gainSign}${fmt$(stableGain)}</div>
+          <div class="st-stat-sub">stable side → ${fmt$(stableStressed)}</div>
+        </div>
+        <div class="st-stat-card" style="border-top:3px solid var(--teal);background:#fff">
+          <div class="st-stat-label">Distribution Bridge</div>
+          <div class="st-stat-value recovery" id="st-bridge-years">—</div>
+          <div class="st-stat-sub" id="st-bridge-years-sub">enter distributions below</div>
         </div>
       </div>
+
       <div class="st-bridge-rows">${rowsHTML}</div>
       <div class="st-bridge-input-row">
         <label>💵 Client distributions:</label>
@@ -4509,16 +4523,25 @@ function updateStressBridge() {
   const fmt$ = n => '$' + Math.abs(Math.round(n)).toLocaleString('en-US');
   const amt = parseFloat(_stDistAmount);
   const { stableStressed, recoveryYears, recoveryLabel } = _stBridgeData;
+  const yearsCard = document.getElementById('st-bridge-years');
+  const yearsSub  = document.getElementById('st-bridge-years-sub');
 
   if (!amt || amt <= 0) {
+    if (yearsCard) yearsCard.textContent = '—';
+    if (yearsSub)  yearsSub.textContent  = 'enter distributions below';
     box.innerHTML = `<div class="st-bridge-msg info">Enter the client's regular distributions above to see how long their stable holdings alone could carry their income through a downturn like this.</div>`;
     return;
   }
 
   const annual = _stDistFreq === 'monthly' ? amt * 12 : amt;
   const years  = stableStressed / annual;
-  const yrsTxt = years >= 40 ? '40+ years' : (years >= 10 ? Math.round(years) + ' years' : years.toFixed(1) + ' years');
+  const yrsTxt = years >= 40 ? '40+ yrs' : (years >= 10 ? Math.round(years) + ' yrs' : years.toFixed(1) + ' yrs');
+  const yrsTxtLong = years >= 40 ? '40+ years' : (years >= 10 ? Math.round(years) + ' years' : years.toFixed(1) + ' years');
   const monthsTxt = Math.round(years * 12);
+
+  if (yearsCard) yearsCard.textContent = yrsTxt;
+  if (yearsSub)  yearsSub.textContent  = 'of distributions covered at ' + fmt$(annual) + '/yr';
+
   let barHTML = '', cls, msg;
 
   if (recoveryYears) {
@@ -4526,7 +4549,7 @@ function updateStressBridge() {
     barHTML = `
       <div style="margin-top:14px">
         <div style="display:flex;justify-content:space-between;gap:8px;font-size:.58rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#3d6b52;margin-bottom:5px;flex-wrap:wrap">
-          <span>Income covered by stable assets: ${yrsTxt}</span>
+          <span>Income covered by stable assets: ${yrsTxtLong}</span>
           <span>Historical recovery: ~${recoveryLabel}</span>
         </div>
         <div style="height:12px;background:#d5e6da;border-radius:6px;overflow:hidden">
@@ -4535,19 +4558,18 @@ function updateStressBridge() {
       </div>`;
     if (years >= recoveryYears) {
       cls = 'ok';
-      msg = `<strong>✓ Fully bridged.</strong> At ${fmt$(annual)} per year, the stable side of the portfolio alone could cover roughly <strong>${yrsTxt}</strong> of distributions — longer than the ~${recoveryLabel} it historically took markets to reach new highs after this event. In a downturn like this, income could come entirely from cash and bonds while the growth side is given the time it needs to recover. Nothing would have to be sold at depressed prices.`;
+      msg = `<strong>✓ Fully bridged.</strong> At ${fmt$(annual)} per year, the stable side of the portfolio alone could cover roughly <strong>${yrsTxtLong}</strong> of distributions — longer than the ~${recoveryLabel} it historically took markets to reach new highs after this event. In a downturn like this, income could come entirely from cash and bonds while the growth side is given the time it needs to recover. Nothing would have to be sold at depressed prices.`;
     } else {
       cls = 'partial';
-      msg = `At ${fmt$(annual)} per year, stable holdings could cover roughly <strong>${yrsTxt}</strong> of distributions (about ${monthsTxt} months) against a historical recovery of ~${recoveryLabel}. That is a meaningful head start — and a good reason to talk now, while markets are calm, about setting aside a bit more on the stable side so income never has to come from selling stocks at low prices.`;
+      msg = `At ${fmt$(annual)} per year, stable holdings could cover roughly <strong>${yrsTxtLong}</strong> of distributions (about ${monthsTxt} months) against a historical recovery of ~${recoveryLabel}. That is a meaningful head start — and a good reason to talk now, while markets are calm, about setting aside a bit more on the stable side so income never has to come from selling stocks at low prices.`;
     }
   } else {
     cls = 'ok';
-    msg = `At ${fmt$(annual)} per year, the stable side of the portfolio alone could cover roughly <strong>${yrsTxt}</strong> of distributions — a real cushion that lets the rest of the portfolio ride out an extended downturn without being sold at the wrong time.`;
+    msg = `At ${fmt$(annual)} per year, the stable side of the portfolio alone could cover roughly <strong>${yrsTxtLong}</strong> of distributions — a real cushion that lets the rest of the portfolio ride out an extended downturn without being sold at the wrong time.`;
   }
 
   box.innerHTML = barHTML + `<div class="st-bridge-msg ${cls}">${msg}</div>`;
 }
-
 
 function openStressTest() {
   const overlay = document.getElementById('st-modal-overlay');
