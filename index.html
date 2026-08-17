@@ -7,7 +7,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&family=Nunito+Sans:wght@300;400;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<link rel="stylesheet" href="main.css">
+<link rel="stylesheet" href="css/main.css">
 </head>
 <body>
 
@@ -24,7 +24,7 @@
   </div>
 </div>
 
-<script src="00-api.js"></script>
+<script src="js/00-api.js"></script>
 
 <!-- HEADER -->
 <div class="hdr">
@@ -69,10 +69,10 @@
     <div class="tc-icon tc-icon-client">📋</div>
     <div class="tc-tag tc-tag-client">Client-Facing</div>
     <div class="tc-title">Risk Tolerance Questionnaire</div>
-    <div class="tc-desc">Walk clients through our three-bucket philosophy, then score their Bucket Three risk tolerance with 8 behavioral questions — individually or as a couple.</div>
+    <div class="tc-desc">Walk clients through our three-bucket philosophy, then score their Bucket Three risk tolerance with 7 behavioral questions — individually or as a couple.</div>
     <div class="tc-features">
       <div class="tc-feat"><div class="tc-feat-dot"></div>Three-bucket philosophy introduction</div>
-      <div class="tc-feat"><div class="tc-feat-dot"></div>8 behavioral questions · risk score 0–100</div>
+      <div class="tc-feat"><div class="tc-feat-dot"></div>7 behavioral questions · risk score 0–100</div>
       <div class="tc-feat"><div class="tc-feat-dot"></div>Couple mode with individual score tracking</div>
       <div class="tc-feat"><div class="tc-feat-dot"></div>Suggested allocation by risk profile</div>
       <div class="tc-feat"><div class="tc-feat-dot"></div>Full Q&amp;A compliance record · copy to CRM</div>
@@ -183,7 +183,7 @@
   </div>
   <div class="cta-row">
     <button class="btn-start" onclick="startQuiz()">Begin Risk Questionnaire →</button>
-    <div class="cta-note">8 simple questions · About 3 minutes<br>Strictly confidential · Results reviewed with your advisor</div>
+    <div class="cta-note">7 simple questions · About 3 minutes<br>Strictly confidential · Results reviewed with your advisor</div>
   </div>
   <div class="couple-toggle-wrap">
     <label class="couple-toggle-label">
@@ -214,20 +214,19 @@
   </div>
   <div class="progress-wrap">
     <div class="progress-track"><div class="progress-fill" id="prog-fill"></div></div>
-    <div class="progress-meta"><div class="progress-label" id="prog-label">Question 1 of 8</div><div class="progress-count" id="prog-score">Score: —</div></div>
+    <div class="progress-meta"><div class="progress-label" id="prog-label">Question 1 of 7</div><div class="progress-count" id="prog-score">Score: —</div></div>
   </div>
 
   <!-- Q1 -->
   <div class="q-step active" id="q-1">
     <div class="qcard">
-      <div class="q-num">Question 1 of 8</div>
+      <div class="q-num">Question 1 of 7</div>
       <div class="q-text">When you think about investing, what matters most to you?</div>
       <div class="q-sub">Go with your first instinct — there's no right answer.</div>
       <div class="opts">
         <div class="opt" onclick="pick(this,'q1',1)"><div class="opt-dot"></div><div><div class="opt-lbl">Making sure I don't lose what I have</div></div></div>
         <div class="opt" onclick="pick(this,'q1',2)"><div class="opt-dot"></div><div><div class="opt-lbl">Steady, reliable growth — nothing too dramatic</div></div></div>
-        <div class="opt" onclick="pick(this,'q1',4)"><div class="opt-dot"></div><div><div class="opt-lbl">Growing my money significantly over time, even if it's bumpy</div></div></div>
-        <div class="opt" onclick="pick(this,'q1',5)"><div class="opt-dot"></div><div><div class="opt-lbl">Maximum long-term growth — I can handle the ups and downs</div></div></div>
+        <div class="opt" onclick="pick(this,'q1',5)"><div class="opt-dot"></div><div><div class="opt-lbl">Growing my money significantly over time — I can handle the ups and downs</div></div></div>
       </div>
       <div class="second-ans-wrap" id="second-ans-1"><div class="second-ans-label" id="second-ans-lbl-1">Second Response</div><div class="second-ans-opts" id="second-ans-opts-1"></div></div>
       <button class="btn-add-second" id="btn-add-second-1" onclick="showSecondAnswer(1)">+ Add Second Response</button>
@@ -238,13 +237,13 @@
   <!-- Q2 -->
   <div class="q-step" id="q-2">
     <div class="qcard">
-      <div class="q-num">Question 2 of 8</div>
+      <div class="q-num">Question 2 of 7</div>
       <div class="q-text">Which outcome would bother you more?</div>
       <div class="q-sub">This reveals whether avoiding loss or missing gains matters more to you.</div>
       <div class="opts">
         <div class="opt" onclick="pick(this,'q2',2)"><div class="opt-dot"></div><div><div class="opt-lbl">Losing 15% in a market downturn</div><div class="opt-det">Protecting what I have comes first</div></div></div>
-        <div class="opt" onclick="pick(this,'q2',3)"><div class="opt-dot"></div><div><div class="opt-lbl">Both bother me equally</div></div></div>
         <div class="opt" onclick="pick(this,'q2',4)"><div class="opt-dot"></div><div><div class="opt-lbl">Missing a 20% gain because I was too conservative</div><div class="opt-det">Missing out feels worse than a temporary loss</div></div></div>
+        <div class="opt" onclick="pick(this,'q2',3)"><div class="opt-dot"></div><div><div class="opt-lbl">Both bother me equally</div></div></div>
       </div>
       <div class="second-ans-wrap" id="second-ans-2"><div class="second-ans-label" id="second-ans-lbl-2">Second Response</div><div class="second-ans-opts" id="second-ans-opts-2"></div></div>
       <button class="btn-add-second" id="btn-add-second-2" onclick="showSecondAnswer(2)">+ Add Second Response</button>
@@ -255,9 +254,9 @@
   <!-- Q3 -->
   <div class="q-step" id="q-3">
     <div class="qcard">
-      <div class="q-num">Question 3 of 8</div>
-      <div class="q-text">Your long-term portfolio drops 25% in a single year. What's your first instinct?</div>
-      <div class="q-sub">Don't overthink it — go with your gut.</div>
+      <div class="q-num">Question 3 of 7</div>
+      <div class="q-text">A sudden shock — like the 2020 COVID crash — drops your long-term portfolio about 34% in just five weeks. What's your first instinct?</div>
+      <div class="q-sub">This actually happened in early 2020. Don't overthink it — go with your gut.</div>
       <div class="opts">
         <div class="opt" onclick="pick(this,'q3',5)"><div class="opt-dot"></div><div><div class="opt-lbl">Buy more — this looks like an opportunity</div><div class="opt-det">Downturns are when real wealth gets built</div></div></div>
         <div class="opt" onclick="pick(this,'q3',4)"><div class="opt-dot"></div><div><div class="opt-lbl">Stay put — this is exactly what we planned for</div><div class="opt-det">Don't touch it, the plan is working</div></div></div>
@@ -272,7 +271,7 @@
   <!-- Q4 -->
   <div class="q-step" id="q-4">
     <div class="qcard">
-      <div class="q-num">Question 4 of 8</div>
+      <div class="q-num">Question 4 of 7</div>
       <div class="q-text">Choose the portfolio you'd feel most comfortable owning long-term:</div>
       <div class="q-sub">Think about the full range — not just the average.</div>
       <div class="opts">
@@ -289,7 +288,7 @@
   <!-- Q5 -->
   <div class="q-step" id="q-5">
     <div class="qcard">
-      <div class="q-num">Question 5 of 8</div>
+      <div class="q-num">Question 5 of 7</div>
       <div class="q-text">What annual return would feel like a win for your long-term portfolio?</div>
       <div class="opts">
         <div class="opt" onclick="pick(this,'q5',2)"><div class="opt-dot"></div><div><div class="opt-lbl">4–6% — steady, modest growth above a savings account</div></div></div>
@@ -306,7 +305,7 @@
   <!-- Q6 -->
   <div class="q-step" id="q-6">
     <div class="qcard">
-      <div class="q-num">Question 6 of 8</div>
+      <div class="q-num">Question 6 of 7</div>
       <div class="q-text">Breaking news: analysts are predicting a market crash. How do you react?</div>
       <div class="opts">
         <div class="opt" onclick="pick(this,'q6',1)"><div class="opt-dot"></div><div><div class="opt-lbl">I move to safer investments right away</div></div></div>
@@ -322,35 +321,18 @@
   <!-- Q7 -->
   <div class="q-step" id="q-7">
     <div class="qcard">
-      <div class="q-num">Question 7 of 8</div>
-      <div class="q-text">Have you been through a major market decline before — like 2008 or 2020?</div>
+      <div class="q-num">Question 7 of 7</div>
+      <div class="q-text">What's the biggest annual loss you could absorb in your long-term portfolio without losing sleep?</div>
       <div class="opts">
-        <div class="opt" onclick="pick(this,'q7',5)"><div class="opt-dot"></div><div><div class="opt-lbl">Yes — I stayed invested and it reinforced my confidence</div></div></div>
-        <div class="opt" onclick="pick(this,'q7',4)"><div class="opt-dot"></div><div><div class="opt-lbl">Yes — I got nervous but held on, and I learned from it</div></div></div>
-        <div class="opt" onclick="pick(this,'q7',2)"><div class="opt-dot"></div><div><div class="opt-lbl">Yes — and it made me a lot more cautious going forward</div></div></div>
-        <div class="opt" onclick="pick(this,'q7',3)"><div class="opt-dot"></div><div><div class="opt-lbl">No — I haven't been through a major downturn yet</div></div></div>
+        <div class="opt" onclick="pick(this,'q7',5)"><div class="opt-dot"></div><div><div class="opt-lbl">More than 25%</div><div class="opt-det">I accept large drawdowns as the price of long-term growth</div></div></div>
+        <div class="opt" onclick="pick(this,'q7',4)"><div class="opt-dot"></div><div><div class="opt-lbl">15% – 25%</div><div class="opt-det">Significant drops are hard but I stay the course</div></div></div>
+        <div class="opt" onclick="pick(this,'q7',3)"><div class="opt-dot"></div><div><div class="opt-lbl">5% – 15%</div><div class="opt-det">Moderate losses — I'd check in with my advisor but not overreact</div></div></div>
+        <div class="opt" onclick="pick(this,'q7',1)"><div class="opt-dot"></div><div><div class="opt-lbl">As little as possible</div><div class="opt-det">Preserving what I have feels more important than growth</div></div></div>
       </div>
       <div class="second-ans-wrap" id="second-ans-7"><div class="second-ans-label" id="second-ans-lbl-7">Second Response</div><div class="second-ans-opts" id="second-ans-opts-7"></div></div>
       <button class="btn-add-second" id="btn-add-second-7" onclick="showSecondAnswer(7)">+ Add Second Response</button>
     </div>
-    <div class="q-nav"><button class="btn-back" onclick="qGo(6)">← Back</button><button class="btn-next" onclick="qGo(8)">Next →</button></div>
-  </div>
-
-  <!-- Q8 -->
-  <div class="q-step" id="q-8">
-    <div class="qcard">
-      <div class="q-num">Question 8 of 8</div>
-      <div class="q-text">What's the biggest annual loss you could absorb in your long-term portfolio without losing sleep?</div>
-      <div class="opts">
-        <div class="opt" onclick="pick(this,'q8',5)"><div class="opt-dot"></div><div><div class="opt-lbl">More than 25%</div><div class="opt-det">I accept large drawdowns as the price of long-term growth</div></div></div>
-        <div class="opt" onclick="pick(this,'q8',4)"><div class="opt-dot"></div><div><div class="opt-lbl">15% – 25%</div><div class="opt-det">Significant drops are hard but I stay the course</div></div></div>
-        <div class="opt" onclick="pick(this,'q8',3)"><div class="opt-dot"></div><div><div class="opt-lbl">5% – 15%</div><div class="opt-det">Moderate losses — I'd check in with my advisor but not overreact</div></div></div>
-        <div class="opt" onclick="pick(this,'q8',1)"><div class="opt-dot"></div><div><div class="opt-lbl">As little as possible</div><div class="opt-det">Preserving what I have feels more important than growth</div></div></div>
-      </div>
-      <div class="second-ans-wrap" id="second-ans-8"><div class="second-ans-label" id="second-ans-lbl-8">Second Response</div><div class="second-ans-opts" id="second-ans-opts-8"></div></div>
-      <button class="btn-add-second" id="btn-add-second-8" onclick="showSecondAnswer(8)">+ Add Second Response</button>
-    </div>
-    <div class="q-nav"><button class="btn-back" onclick="qGo(7)">← Back</button><button class="btn-done" onclick="showQuizResults()">See My Results →</button></div>
+    <div class="q-nav"><button class="btn-back" onclick="qGo(6)">← Back</button><button class="btn-done" onclick="showQuizResults()">See My Results →</button></div>
   </div>
 </div>
 </div>
@@ -491,11 +473,11 @@
 </div>
 </div>
 
-<script src="10-core-questionnaire.js"></script>
-<script src="20-portfolio-analyzer.js"></script>
-<script src="30-accounts-deepdive.js"></script>
-<script src="40-stress-test.js"></script>
-<script src="50-single-stock-data.js"></script>
+<script src="js/10-core-questionnaire.js"></script>
+<script src="js/20-portfolio-analyzer.js"></script>
+<script src="js/30-accounts-deepdive.js"></script>
+<script src="js/40-stress-test.js"></script>
+<script src="js/50-single-stock-data.js"></script>
 
 <!-- ADD ACCOUNT MODAL -->
 <div class="aa-overlay" id="aa-overlay" style="display:none" onclick="if(event.target===this)closeAddAccountModal()">
@@ -865,11 +847,11 @@
 </div>
 </div>
 
-<script src="60-model-library.js"></script>
+<script src="js/60-model-library.js"></script>
 
 
 
-<script src="70-proposal-builder.js"></script>
+<script src="js/70-proposal-builder.js"></script>
 
 
 <!-- ══ HOLDING EDIT MODAL ══ -->
@@ -913,7 +895,7 @@
 </div>
 
 
-<script src="80-clients-alignment.js"></script>
+<script src="js/80-clients-alignment.js"></script>
 
 <!-- ══ CLIENT PROFILE BAR ══ -->
 <div class="cp-client-bar" id="cp-client-bar" onclick="cpOpenModal()">
