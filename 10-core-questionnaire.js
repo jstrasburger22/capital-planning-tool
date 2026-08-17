@@ -29,17 +29,16 @@ document.addEventListener('click', e => { if (!e.target.closest('.adv-menu-wrap'
 
 // ══ QUESTIONNAIRE STATE ══
 const QUIZ_QA_MAP = {
-  q1:{ text:'When you think about investing, what matters most to you?', opts:{1:'Making sure I don\'t lose what I have',2:'Steady, reliable growth — nothing too dramatic',4:'Growing my money significantly over time, even if it\'s bumpy',5:'Maximum long-term growth — I can handle the ups and downs'} },
+  q1:{ text:'When you think about investing, what matters most to you?', opts:{1:'Making sure I don\'t lose what I have',2:'Steady, reliable growth — nothing too dramatic',5:'Growing my money significantly over time — I can handle the ups and downs'} },
   q2:{ text:'Which outcome would bother you more?', opts:{2:'Losing 15% in a market downturn',3:'Both bother me equally',4:'Missing a 20% gain because I was too conservative'} },
-  q3:{ text:'Your long-term portfolio drops 25% in a single year. What\'s your first instinct?', opts:{5:'Buy more — this looks like an opportunity',4:'Stay put — this is exactly what we planned for',1:'Get out — protect what\'s left'} },
+  q3:{ text:'A sudden shock — like the 2020 COVID crash — drops your long-term portfolio about 34% in five weeks. What\'s your first instinct?', opts:{5:'Buy more — this looks like an opportunity',4:'Stay put — this is exactly what we planned for',1:'Get out — protect what\'s left'} },
   q4:{ text:'Choose the portfolio you\'d feel most comfortable owning long-term:', opts:{1:'Best: +8% / Worst: −2% / Avg: +4%',3:'Best: +18% / Worst: −12% / Avg: +8%',5:'Best: +35% / Worst: −25% / Avg: +12%'} },
   q5:{ text:'What annual return would feel like a win for your long-term portfolio?', opts:{2:'4–6% — steady, modest growth above savings',3:'7–9% — long-term market-like returns',4:'10–14% — above-average historical returns; I accept the added risk',5:'15%+ — maximum growth; comfortable with significant swings'} },
   q6:{ text:'Breaking news: analysts predict a market crash. How do you react?', opts:{1:'I move to safer investments right away',3:'I check with my advisor but don\'t make major changes',5:'I tune it out — predictions are rarely accurate'} },
-  q7:{ text:'Have you been through a major market decline before (2008 or 2020)?', opts:{5:'Yes — stayed invested, it reinforced my confidence',4:'Yes — got nervous but held on, learned from it',2:'Yes — made me a lot more cautious going forward',3:'No — haven\'t been through a major downturn yet'} },
-  q8:{ text:'What\'s the biggest annual loss you could absorb in Bucket Three without losing sleep?', opts:{5:'More than 25%',4:'15%–25% — significant drops are hard but I stay the course',3:'5%–15% — moderate losses, I\'d check in but not overreact',1:'As little as possible'} }
+  q7:{ text:'What\'s the biggest annual loss you could absorb in Bucket Three without losing sleep?', opts:{5:'More than 25%',4:'15%–25% — significant drops are hard but I stay the course',3:'5%–15% — moderate losses, I\'d check in but not overreact',1:'As little as possible'} }
 };
-const QW    = { q1:12, q2:10, q3:20, q4:16, q5:12, q6:8, q7:6, q8:22 };
-const Q_MAX = { q1:5,  q2:4,  q3:5,  q4:5,  q5:5,  q6:5, q7:5, q8:5  };
+const QW    = { q1:12, q2:10, q3:23, q4:16, q5:12, q6:9, q7:22 };
+const Q_MAX = { q1:5,  q2:4,  q3:5,  q4:5,  q5:5,  q6:5, q7:5  };
 
 let coupleMode = false;
 let p1Name = 'Spouse 1', p2Name = 'Spouse 2';
@@ -56,14 +55,14 @@ function startQuiz() {
   if (coupleMode) {
     p1Name = document.getElementById('name-p1').value.trim() || 'Spouse 1';
     p2Name = document.getElementById('name-p2').value.trim() || 'Spouse 2';
-    for (let i = 1; i <= 8; i++) {
+    for (let i = 1; i <= 7; i++) {
       const lbl = document.getElementById('second-ans-lbl-' + i);
       const btn = document.getElementById('btn-add-second-' + i);
       if (lbl) lbl.textContent = p2Name + "'s Response";
       if (btn) btn.classList.add('couple-active');
     }
   } else {
-    for (let i = 1; i <= 8; i++) {
+    for (let i = 1; i <= 7; i++) {
       const btn = document.getElementById('btn-add-second-' + i);
       if (btn) btn.classList.remove('couple-active');
     }
@@ -117,12 +116,12 @@ function qGo(n) {
 }
 
 function updateProgress() {
-  const pct  = Math.round(((curQ - 1) / 8) * 100) + 4;
+  const pct  = Math.round(((curQ - 1) / 7) * 100) + 4;
   const fill = document.getElementById('prog-fill');
   const lbl  = document.getElementById('prog-label');
   const sc   = document.getElementById('prog-score');
   if (fill) fill.style.width = pct + '%';
-  if (lbl)  lbl.textContent  = 'Question ' + curQ + ' of 8';
+  if (lbl)  lbl.textContent  = 'Question ' + curQ + ' of 7';
   const s = calcQScore(A);
   if (sc) sc.textContent = s !== null ? 'Score: ' + s : 'Score: —';
 }
@@ -266,7 +265,7 @@ function renderComplianceBlock(s1, s2) {
   text += '───────────────────────────────────────────────────────────\n\n';
   text += 'QUESTION & ANSWER RECORD\n\n';
 
-  for (let i = 1; i <= 8; i++) {
+  for (let i = 1; i <= 7; i++) {
     const qKey = 'q' + i;
     const qa   = QUIZ_QA_MAP[qKey];
     const a1v  = A[qKey];
