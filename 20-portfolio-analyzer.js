@@ -156,12 +156,25 @@ function parseCSVLocally(csvText) {
 
   if (!accountOrder.length) return null;
 
-  // Extract client name from account labels like "Dann - MWP IRA (7473)"
-  const allNames = accountOrder.map(a => {
-    const m = a.match(/^([A-Z][a-z]+)\s*[-–]/);
-    return m ? m[1] : null;
+  // Extract client name(s) from account labels like "Dann - MWP IRA (7473)",
+  // "Mary Smith - Roth", "SMITH - IRA", "Joint - Brokerage".
+  // Account-type / custodian words are NOT client names.
+  const NON_NAME = /^(joint|jt|jtwros|individual|indiv|trust|revocable|living|irrevocable|estate|fund|ira|roth|trad|traditional|sep|simple|tod|pod|custodial|ugma|utma|brokerage|account|acct|rollover|inherited|beneficiary|managed|advisory|taxable|cash|margin|corporate|corp|llc|sole|tenants|entity|fbo|the|sample|demo|swm|lpl|ria|sma)$/i;
+  const TRAIL_JUNK = /\s+(?:joint|jt|jtwros|ira|roth|trad|traditional|sep|simple|tod|pod|brokerage|account|acct|trust|llc|corp|individual|managed|advisory|taxable|cash|margin|rollover|inherited|custodial|ugma|utma|swm|lpl)$/i;
+  const rawNames = accountOrder.map(a => {
+    let before = String(a).split(/[-–—]/)[0].trim();          // text before the first dash
+    if (!before) return null;
+    if (!/^[A-Za-z][A-Za-z'’.\- ]*$/.test(before)) return null;   // letters/apostrophes/spaces only
+    let name = before.replace(/\s+/g, ' ').trim();
+    while (TRAIL_JUNK.test(name)) name = name.replace(TRAIL_JUNK, '').trim(); // strip trailing "IRA" etc.
+    if (!name) return null;
+    if (NON_NAME.test(name.split(' ')[0])) return null;                // leading word is an account type
+    return name;
   }).filter(Boolean);
-  const uniqueNames = [...new Set(allNames)];
+  // De-dupe case-insensitively, keep first spelling seen
+  const _seen = new Set();
+  const uniqueNames = [];
+  for (const n of rawNames) { const k = n.toLowerCase(); if (!_seen.has(k)) { _seen.add(k); uniqueNames.push(n); } }
   const portfolioName = uniqueNames.length >= 2
     ? uniqueNames.slice(0, 2).join(' & ') + "'s Portfolio"
     : uniqueNames.length === 1
@@ -809,8 +822,18 @@ function formatPortfolioTitle(raw) {
   let s = String(raw).trim();
   if (!s || /^(client portfolio|investment portfolio)$/i.test(s)) return 'Investment Portfolio';
 
+  // Drop account-type tokens mistaken for a person in "&"/"and" joins,
+  // e.g. "Joint & Mark" or "Joint & Mark's Portfolio" → "Mark's Portfolio".
+  if (/\s+(?:&|and)\s+/i.test(s)) {
+    const NON_NAME_PART = /^(joint|jt|jtwros|individual|trust|revocable|living|estate|ira|roth|tod|pod|sep|simple|brokerage|account|custodial|managed|advisory|taxable|cash|margin|corporate|corp|llc|the)$/i;
+    const core = s.replace(/['‘’]s\s+portfolio$/i, '').replace(/\s+portfolio$/i, '').trim();
+    const parts = core.split(/\s*(?:&|and)\s*/i).map(p => p.trim()).filter(Boolean);
+    const realParts = parts.filter(p => !NON_NAME_PART.test(p.split(' ')[0]));
+    if (realParts.length && realParts.length < parts.length) s = realParts.join(' & ');
+  }
+
   // Already clean — "Name's Portfolio" form
-  if (/['']\s*s?\s+portfolio$/i.test(s)) return s;
+  if (/['‘’]\s*s?\s+portfolio$/i.test(s)) return s;
 
   // Strip leading junk prefixes like "SWM —", "Sample —", "Demo —"
   s = s.replace(/^(sample|demo|example|test|swm|lpl)\s*[-–—:]\s*/i, '').trim();
