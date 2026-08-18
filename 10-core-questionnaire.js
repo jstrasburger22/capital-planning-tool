@@ -429,6 +429,7 @@ function saveAsImage(viewId, btnId, filename, forceDownload) {
             <div style="font-size:.65rem;color:#6b7e96">${acctLevel}</div>
           </div>
         </div>
+        ${(() => { const chips = buildAccountAllocHTML(acct.holdings || [], cashAdded); return chips ? `<div style="display:flex;flex-wrap:wrap;gap:6px;padding:10px 0 14px">${chips}</div>` : ''; })()}
         <table class="htable">
           <thead><tr><th>Ticker</th><th>Holding</th><th>Type</th><th style="text-align:center">Value</th><th style="text-align:center">Alloc</th><th style="text-align:center">Risk</th><th>Level</th></tr></thead>
           <tbody>${rowsHtml}</tbody>
