@@ -15,12 +15,9 @@ function riskColorSafe(s) {
 
 function cpCaptureTolerance(s1, s2) {
   const hasS2 = (s2 !== null && s2 !== undefined);
-  const today = new Date().toISOString().slice(0, 10);
   _clientTolerance = {
     s1: s1,
     s2: hasS2 ? s2 : null,
-    asOf1: today,
-    asOf2: hasS2 ? today : null,
     household: hasS2 ? Math.round((s1 + s2) / 2) : s1,
     coupleMode: hasS2,
     p1Name: (typeof p1Name !== 'undefined' && p1Name) ? p1Name : 'Client',
@@ -32,95 +29,18 @@ function cpCaptureTolerance(s1, s2) {
   if (typeof cpAutoSaveTolerance === 'function') cpAutoSaveTolerance();
 }
 
-// Show/hide the manual entry editor. Prefills from existing tolerance.
-function toggleToleranceEditor(show) {
-  const ed = document.getElementById('align-editor');
-  if (!ed) return;
-  ed.style.display = show ? 'block' : 'none';
-}
-
-// Save from the manual editor — supports one or two named people, each with a date.
-function saveManualTolerance() {
-  const n1 = (document.getElementById('align-name1') || {}).value || '';
-  const v1 = parseInt((document.getElementById('align-score1') || {}).value);
-  const d1 = (document.getElementById('align-date1') || {}).value || '';
-  const couple = (document.getElementById('align-couple-chk') || {}).checked;
-  const n2 = (document.getElementById('align-name2') || {}).value || '';
-  const v2raw = (document.getElementById('align-score2') || {}).value;
-  const v2 = parseInt(v2raw);
-  const d2 = (document.getElementById('align-date2') || {}).value || '';
-
-  if (isNaN(v1) || v1 < 0 || v1 > 100) { alert('Enter a risk score between 0 and 100 for the first person.'); return; }
-  if (couple && (isNaN(v2) || v2 < 0 || v2 > 100)) { alert('Enter a risk score between 0 and 100 for the second person, or uncheck the second person.'); return; }
-
-  const household = couple ? Math.round((v1 + v2) / 2) : v1;
+function setManualTolerance() {
+  const el = document.getElementById('align-manual-score');
+  const v = parseInt(el && el.value);
+  if (isNaN(v) || v < 0 || v > 100) { alert('Enter a target risk score between 0 and 100.'); return; }
   _clientTolerance = {
-    s1: v1,
-    s2: couple ? v2 : null,
-    asOf1: d1 || null,
-    asOf2: couple ? (d2 || null) : null,
-    household: household,
-    coupleMode: couple,
-    p1Name: n1.trim() || 'Client',
-    p2Name: couple ? (n2.trim() || 'Co-Client') : null,
+    s1: v, s2: null, household: v, coupleMode: false,
     date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
     source: 'manual'
   };
   renderRiskAlignment();
   if (typeof cpAutoSaveTolerance === 'function') cpAutoSaveTolerance();
 }
-
-// Kept for backward compatibility with any older saved profiles / calls.
-function setManualTolerance() { saveManualTolerance(); }
-
-// Format an ISO date (yyyy-mm-dd) as "Mon d, yyyy"; returns '' if empty.
-function fmtAsOf(iso) {
-  if (!iso) return '';
-  const parts = iso.split('-');
-  if (parts.length !== 3) return iso;
-  const d = new Date(parts[0], parts[1] - 1, parts[2]);
-  if (isNaN(d)) return iso;
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-}
-
-// Months elapsed since an ISO date; null if empty/invalid.
-function monthsSince(iso) {
-  if (!iso) return null;
-  const parts = iso.split('-');
-  if (parts.length !== 3) return null;
-  const then = new Date(parts[0], parts[1] - 1, parts[2]);
-  if (isNaN(then)) return null;
-  const now = new Date();
-  return (now.getFullYear() - then.getFullYear()) * 12 + (now.getMonth() - then.getMonth());
-}
-
-// Build the editor markup, prefilled from current tolerance (or blank).
-function alignEditorHTML() {
-  const t = _clientTolerance || {};
-  const couple = !!t.coupleMode;
-  const esc = s => (s || '').replace(/"/g, '&quot;');
-  return `<div class="align-editor" id="align-editor" style="display:none">
-    <div class="align-ed-row">
-      <input type="text" id="align-name1" placeholder="Name (optional)" value="${esc(t.p1Name && t.p1Name !== 'Client' ? t.p1Name : '')}">
-      <input type="number" id="align-score1" min="0" max="100" placeholder="Risk score" value="${(t.s1 != null ? t.s1 : '')}">
-      <label class="align-ed-lbl">as of</label>
-      <input type="date" id="align-date1" value="${t.asOf1 || ''}">
-    </div>
-    <label class="align-couple-toggle"><input type="checkbox" id="align-couple-chk" ${couple ? 'checked' : ''} onchange="document.getElementById('align-person2').style.display=this.checked?'flex':'none'"> Add a second person (spouse / co-client)</label>
-    <div class="align-ed-row" id="align-person2" style="display:${couple ? 'flex' : 'none'}">
-      <input type="text" id="align-name2" placeholder="Name (optional)" value="${esc(t.p2Name && t.p2Name !== 'Co-Client' ? t.p2Name : '')}">
-      <input type="number" id="align-score2" min="0" max="100" placeholder="Risk score" value="${(t.s2 != null ? t.s2 : '')}">
-      <label class="align-ed-lbl">as of</label>
-      <input type="date" id="align-date2" value="${t.asOf2 || ''}">
-    </div>
-    <div class="align-ed-actions">
-      <button class="align-ed-save" onclick="saveManualTolerance()">Save risk scores</button>
-      <button class="align-ed-cancel" onclick="toggleToleranceEditor(false)">Cancel</button>
-    </div>
-  </div>`;
-}
-
-const ALIGN_STALE_MONTHS = 12; // flag assessments at least this old
 
 function renderRiskAlignment() {
   const host = document.getElementById('az-alignment');
@@ -132,10 +52,11 @@ function renderRiskAlignment() {
   if (!_clientTolerance) {
     host.innerHTML = `<div class="align-card">
       <div class="align-head"><div class="align-title">🎯 Risk Alignment</div><div class="align-badge" style="background:#f2f0ea;color:#6b7e96">No tolerance on file</div></div>
-      <div style="font-size:.74rem;color:#3d4c5c;line-height:1.6;margin-bottom:10px">Complete the Risk Tolerance Questionnaire with this client and their score appears here automatically — or enter risk scores manually below (one person or two, each with the date it was assessed).</div>
-      <button class="align-ed-open" onclick="toggleToleranceEditor(true)">＋ Enter risk scores manually</button>
-      ${alignEditorHTML()}
-    </div>`;
+      <div class="align-manual" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:.74rem;color:#3d4c5c;line-height:1.6">
+        Complete the Risk Tolerance Questionnaire with this client — their score will appear here automatically. Or enter a target score to compare now:
+        <input id="align-manual-score" type="number" min="0" max="100" placeholder="e.g. 55">
+        <button onclick="setManualTolerance()">Set</button>
+      </div></div>`;
     return;
   }
 
@@ -143,64 +64,31 @@ function renderRiskAlignment() {
   const gap = pScore - t.household;
   const abs = Math.abs(gap);
   let cls, badge, msg;
-  const tolWord = t.coupleMode ? "household's blended tolerance" : "client's stated tolerance";
   if (abs <= 10) {
     cls = 'ok'; badge = '✓ Aligned';
-    msg = `The portfolio's risk level is within ${abs} point${abs === 1 ? '' : 's'} of the ${tolWord} — what they own matches the amount of risk they've told us they're comfortable taking.`;
+    msg = `The portfolio's risk level is within ${abs} point${abs === 1 ? '' : 's'} of the client's stated tolerance — what they own matches the amount of risk they've told us they're comfortable taking.`;
   } else if (gap > 0) {
     cls = 'above'; badge = gap + ' pts above tolerance';
-    msg = `The portfolio is taking <strong>${gap} points more risk</strong> than the ${tolWord} of ${t.household}. In a sharp downturn it may fall further than they're emotionally prepared for — a strong, objective starting point for a rebalancing conversation.`;
+    msg = `The portfolio is taking <strong>${gap} points more risk</strong> than the client's stated tolerance of ${t.household}. In a sharp downturn it may fall further than they're emotionally prepared for — a strong, objective starting point for a rebalancing conversation.`;
   } else {
     cls = 'below'; badge = abs + ' pts below tolerance';
-    msg = `The portfolio is <strong>more conservative than the ${tolWord}</strong> by ${abs} points. There may be room to pursue more growth while staying inside their comfort zone — worth confirming whether that caution is intentional.`;
+    msg = `The portfolio is <strong>more conservative than the client's stated tolerance</strong> by ${abs} points. There may be room to pursue more growth while staying inside their comfort zone — worth confirming whether that caution is intentional.`;
   }
-
-  // Per-person tolerance detail (one or two people), with as-of dates + staleness flags.
-  const people = [];
-  people.push({ name: t.p1Name || 'Client', score: t.s1, asOf: t.asOf1 });
-  if (t.coupleMode && t.s2 != null) people.push({ name: t.p2Name || 'Co-Client', score: t.s2, asOf: t.asOf2 });
-
-  let anyStale = false;
-  const personRows = people.map(p => {
-    const m = monthsSince(p.asOf);
-    const stale = (m != null && m >= ALIGN_STALE_MONTHS);
-    if (stale) anyStale = true;
-    const dateTxt = p.asOf ? 'as of ' + fmtAsOf(p.asOf) : 'no date on file';
-    const staleTag = stale ? `<span class="align-stale-tag">⚠ ${Math.floor(m / 12) >= 1 ? Math.floor(m / 12) + 'y' : m + 'mo'} old</span>` : '';
-    return `<div class="align-person">
-      <span class="align-person-dot" style="background:${riskColorSafe(p.score)}"></span>
-      <span class="align-person-name">${p.name}</span>
-      <span class="align-person-score" style="color:${riskColorSafe(p.score)}">${p.score}</span>
-      <span class="align-person-date ${stale ? 'stale' : ''}">${dateTxt}</span>
-      ${staleTag}
-    </div>`;
-  }).join('');
-
-  const householdLabel = t.coupleMode ? 'Blended Tolerance' : 'Client Tolerance';
-  const householdSub = t.coupleMode ? 'average of both scores' : (t.source === 'manual' ? 'entered manually' : 'from questionnaire');
-
-  const staleBanner = anyStale
-    ? `<div class="align-stale-banner">⚠ At least one risk assessment is over ${ALIGN_STALE_MONTHS} months old. Tolerance can drift with age, markets, and life changes — consider refreshing the questionnaire before relying on this comparison.</div>`
-    : '';
-
-  // Pins: portfolio + each person (deduped label stacking handled by CSS offset via nth)
-  const personPins = people.map((p, i) => `<div class="align-pin person" style="left:${p.score}%;background:${riskColorSafe(p.score)}"><span class="${i % 2 ? 'up' : ''}" style="color:${riskColorSafe(p.score)}">${p.name.split(' ')[0]} ${p.score}</span></div>`).join('');
+  const tolSub = t.source === 'manual'
+    ? 'manually entered target'
+    : (t.coupleMode ? `${t.p1Name}: ${t.s1} · ${t.p2Name}: ${t.s2} · household avg` : `questionnaire · ${t.date}`);
 
   host.innerHTML = `<div class="align-card">
     <div class="align-head"><div class="align-title">🎯 Risk Alignment</div><div class="align-badge ${cls}">${badge}</div></div>
     <div class="align-grid">
       <div class="align-cell"><label>Portfolio Risk Score</label><div class="align-num" style="color:${riskColorSafe(pScore)}">${pScore}</div><div class="align-sub">what they own today</div></div>
-      <div class="align-cell"><label>${householdLabel}</label><div class="align-num" style="color:${riskColorSafe(t.household)}">${t.household}</div><div class="align-sub">${householdSub}</div></div>
+      <div class="align-cell"><label>Client Risk Tolerance</label><div class="align-num" style="color:${riskColorSafe(t.household)}">${t.household}</div><div class="align-sub">${tolSub}</div></div>
       <div class="align-cell align-msg"><span>${msg}</span></div>
     </div>
-    <div class="align-people">${personRows}</div>
-    ${staleBanner}
     <div class="align-scale">
+      <div class="align-pin" style="left:${t.household}%"><span>Tolerance ${t.household}</span></div>
       <div class="align-pin" style="left:${pScore}%;background:${riskColorSafe(pScore)}"><span class="up" style="color:${riskColorSafe(pScore)}">Portfolio ${pScore}</span></div>
-      ${personPins}
     </div>
-    <button class="align-ed-open" style="margin-top:6px" onclick="toggleToleranceEditor(true)">✎ Edit risk scores &amp; dates</button>
-    ${alignEditorHTML()}
   </div>`;
 }
 
