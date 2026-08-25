@@ -275,8 +275,217 @@ function parseRecoveryYears(scenario) {
   return { years: isMonths ? n / 12 : n, label: isMonths ? n + ' months' : n + (n === 1 ? ' year' : ' years') };
 }
 
+// ── Formatting helpers shared by the bridge visual ──
+function _bridgeFmt$(n) { return '$' + Math.abs(Math.round(n)).toLocaleString('en-US'); }
+function _bridgeTrim(y) { const s = Math.round(y * 10) / 10; return Number.isInteger(s) ? String(s) : s.toFixed(1); }
+function _bridgeYearsLabel(y) {
+  if (y == null) return '—';
+  if (y >= 40) return '40+ years';
+  if (y >= 10) return Math.round(y) + ' years';
+  if (y >= 1)  { const s = _bridgeTrim(y); return s + (s === '1' ? ' year' : ' years'); }
+  const m = Math.round(y * 12);
+  return m + (m === 1 ? ' month' : ' months');
+}
+function _bridgeYearsShort(y) {
+  if (y == null) return '—';
+  if (y >= 40) return '40+ yr';
+  if (y >= 10) return Math.round(y) + ' yr';
+  if (y >= 1)  return _bridgeTrim(y) + ' yr';
+  return Math.round(y * 12) + ' mo';
+}
+
+// Green / dark-orange / red resolver based on how far the client's bridge reaches.
+// ratio = years the stable side can cover  ÷  years the market historically took to recover.
+function bridgeStatus(ratio) {
+  if (ratio == null || ratio >= 1.10) {
+    return { key:'ok',    deck:'#1d7a50', deck2:'#16a34a', accent:'#1d7a50', pale:'#e9f6ef',
+             sky1:'#eaf5ee', sky2:'#f7fbf8', label:'More than enough', tag:'You can cross', icon:'✓' };
+  }
+  if (ratio >= 0.90) {
+    return { key:'close', deck:'#c2410c', deck2:'#ea6a1f', accent:'#c2410c', pale:'#fdecdf',
+             sky1:'#fdf0e6', sky2:'#fdf9f5', label:'Right on the edge', tag:'Barely reaches', icon:'!' };
+  }
+  return { key:'short',   deck:'#c0392b', deck2:'#e05242', accent:'#c0392b', pale:'#fdeaea',
+           sky1:'#fdeeee', sky2:'#fdf8f8', label:'Short of what\'s needed', tag:'Falls short', icon:'✕' };
+}
+
+// One-time injection of the styles the bridge scene relies on (so it renders
+// even if the host page's stylesheet is missing these rules).
+function injectBridgeStyles() {
+  if (document.getElementById('st-bridge-scene-styles')) return;
+  const s = document.createElement('style');
+  s.id = 'st-bridge-scene-styles';
+  s.textContent = `
+    .st-bridge-scene{width:100%;border-radius:14px;overflow:hidden;border:1px solid #e4e9f0;background:#fff;box-shadow:0 2px 12px rgba(20,40,70,.06)}
+    .st-bridge-scene svg{display:block;width:100%;height:auto}
+    .st-bridge-scene .deck-draw{stroke-dasharray:var(--len);stroke-dashoffset:var(--len);animation:stDeckDraw 1.1s cubic-bezier(.4,0,.2,1) forwards}
+    @keyframes stDeckDraw{to{stroke-dashoffset:0}}
+    .st-bridge-verdict{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:14px}
+    .st-bridge-chip{display:inline-flex;align-items:center;gap:7px;font-size:.72rem;font-weight:800;letter-spacing:.02em;padding:7px 14px;border-radius:30px;color:#fff}
+    .st-bridge-legend{display:flex;flex-wrap:wrap;gap:14px;margin-top:10px;font-size:.64rem;color:#5a6a80;font-weight:600}
+    .st-bridge-legend span{display:inline-flex;align-items:center;gap:6px}
+    .st-bridge-legend i{width:12px;height:12px;border-radius:3px;display:inline-block}
+    @media print{.st-bridge-scene .deck-draw{animation:none;stroke-dashoffset:0}}
+  `;
+  document.head.appendChild(s);
+}
+
+/* Builds the SVG "cross the downturn" bridge scene.
+   opts = { ratio, coverageYears, recoveryYears, recoveryLabel, coverageLabel,
+            neededDollars, haveDollars, shortfallDollars, shortfallYears, st } */
+let _stSceneSeq = 0;
+function buildBridgeScene(opts) {
+  const { ratio, coverageYears, recoveryYears, recoveryLabel, coverageLabel,
+          neededDollars, haveDollars, shortfallDollars, shortfallYears, st } = opts;
+  const uid = 'brg' + (++_stSceneSeq);
+
+  // Canvas geometry
+  const W = 760, H = 340;
+  const deckY = 176;            // top surface of the bridge deck
+  const leftX = 132;            // right edge of the "today" cliff (bridge start)
+  const rightX = 628;           // left edge of the "new highs" cliff (far side)
+  const span = rightX - leftX;  // pixels representing the full recovery period
+  const floorY = H;             // bottom of the canyon
+
+  const clamp = Math.max(0, Math.min(ratio == null ? 1 : ratio, 1));
+  const endX = leftX + span * clamp;        // where the client's bridge ends
+  const complete = (ratio == null) || ratio >= 1;
+
+  // Market path (peak -> trough -> back to new highs) — illustrative shape
+  const troughY = 288;
+  const marketPath =
+    `M${leftX},${deckY} C ${leftX+90},${deckY+70} ${leftX+120},${troughY} ${leftX+span*0.42},${troughY} ` +
+    `S ${rightX-70},${deckY+18} ${rightX},${deckY-14}`;
+
+  // Year gridlines / ticks along the span
+  let ticks = '';
+  if (recoveryYears && recoveryYears >= 1.5) {
+    const R = Math.round(recoveryYears);
+    const step = R > 8 ? 2 : 1;
+    for (let t = 0; t <= R; t += step) {
+      const x = leftX + span * (t / recoveryYears);
+      if (x > rightX + 1) break;
+      ticks += `<line x1="${x.toFixed(1)}" y1="${deckY+10}" x2="${x.toFixed(1)}" y2="${deckY+18}" stroke="#b9c4d4" stroke-width="1"/>` +
+               `<text x="${x.toFixed(1)}" y="${deckY+30}" text-anchor="middle" font-size="10" fill="#8494a8" font-weight="700">${t}${t===R?'y':''}</text>`;
+    }
+  } else {
+    ticks =
+      `<line x1="${leftX}" y1="${deckY+10}" x2="${leftX}" y2="${deckY+18}" stroke="#b9c4d4" stroke-width="1"/>` +
+      `<text x="${leftX}" y="${deckY+30}" text-anchor="middle" font-size="10" fill="#8494a8" font-weight="700">now</text>` +
+      `<line x1="${rightX}" y1="${deckY+10}" x2="${rightX}" y2="${deckY+18}" stroke="#b9c4d4" stroke-width="1"/>` +
+      `<text x="${rightX}" y="${deckY+30}" text-anchor="middle" font-size="10" fill="#8494a8" font-weight="700">${recoveryLabel||'recovery'}</text>`;
+  }
+
+  // Support piers under the built portion of the deck
+  const pierXs = [];
+  const nPiers = Math.max(1, Math.round((endX - leftX) / 120));
+  for (let i = 1; i <= nPiers; i++) pierXs.push(leftX + (endX - leftX) * (i / (nPiers + 1)));
+  const piers = pierXs.map(px => {
+    // pier drops from deck to the market path height at that x (approx via trough)
+    const depth = troughY - 14;
+    return `<line x1="${px.toFixed(1)}" y1="${deckY+6}" x2="${px.toFixed(1)}" y2="${depth}" stroke="${st.deck}" stroke-width="3" opacity=".38"/>`;
+  }).join('');
+
+  // The shortfall (gap) segment, only when the bridge doesn't reach
+  let gap = '';
+  if (!complete) {
+    const midGap = (endX + rightX) / 2;
+    gap =
+      `<line x1="${endX.toFixed(1)}" y1="${deckY-4}" x2="${rightX}" y2="${deckY-4}" stroke="${st.accent}" stroke-width="3" stroke-dasharray="3 6" opacity=".85"/>` +
+      `<polygon points="${endX.toFixed(1)},${deckY-9} ${(endX+13).toFixed(1)},${deckY-4} ${endX.toFixed(1)},${deckY+1}" fill="${st.accent}"/>` +
+      `<g transform="translate(${midGap.toFixed(1)},${deckY-20})">` +
+        `<rect x="-58" y="-15" width="116" height="22" rx="11" fill="${st.accent}"/>` +
+        `<text x="0" y="0" text-anchor="middle" font-size="11" fill="#fff" font-weight="800">${shortfallYears} short</text>` +
+      `</g>`;
+  }
+
+  // "You are here" marker + coverage pill sitting at the end of the built deck
+  const pillX = complete ? Math.min(endX - 4, rightX - 6) : endX;
+  const pillText = complete ? `Your bridge · ${coverageLabel} ✓` : `Your bridge · ${coverageLabel}`;
+  const pillW = Math.max(96, pillText.length * 6.6);
+  const coveragePill =
+    `<g transform="translate(${pillX.toFixed(1)},${deckY-46})">` +
+      `<rect x="${(-pillW/2).toFixed(1)}" y="-16" width="${pillW.toFixed(1)}" height="26" rx="13" fill="${st.deck}"/>` +
+      `<text x="0" y="2" text-anchor="middle" font-size="11.5" fill="#fff" font-weight="800">${pillText}</text>` +
+      `<path d="M0,10 L-6,10 L0,17 L6,10 Z" fill="${st.deck}"/>` +
+    `</g>`;
+
+  const deckLen = (endX - leftX).toFixed(1);
+
+  return `
+  <div class="st-bridge-scene" role="img" aria-label="Bridge across the downturn: your stable assets cover ${coverageLabel} against a recovery of ${recoveryLabel||'the downturn'}.">
+  <svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" font-family="'Nunito Sans',system-ui,sans-serif">
+    <defs>
+      <linearGradient id="${uid}-sky" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="${st.sky1}"/><stop offset="1" stop-color="${st.sky2}"/>
+      </linearGradient>
+      <linearGradient id="${uid}-deck" x1="0" y1="0" x2="1" y2="0">
+        <stop offset="0" stop-color="${st.deck}"/><stop offset="1" stop-color="${st.deck2}"/>
+      </linearGradient>
+      <linearGradient id="${uid}-valley" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#dfe6ef"/><stop offset="1" stop-color="#eef2f7"/>
+      </linearGradient>
+      <linearGradient id="${uid}-cliff" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#2d3f4f"/><stop offset="1" stop-color="#1b2b3a"/>
+      </linearGradient>
+    </defs>
+
+    <!-- sky -->
+    <rect x="0" y="0" width="${W}" height="${H}" fill="url(#${uid}-sky)"/>
+
+    <!-- needed-span bracket (top) -->
+    <line x1="${leftX}" y1="46" x2="${rightX}" y2="46" stroke="#9aa7b8" stroke-width="1.5"/>
+    <line x1="${leftX}" y1="40" x2="${leftX}" y2="52" stroke="#9aa7b8" stroke-width="1.5"/>
+    <line x1="${rightX}" y1="40" x2="${rightX}" y2="52" stroke="#9aa7b8" stroke-width="1.5"/>
+    <g transform="translate(${((leftX+rightX)/2).toFixed(1)},46)">
+      <rect x="-140" y="-16" width="280" height="24" rx="12" fill="#1b2b3a"/>
+      <text x="0" y="1" text-anchor="middle" font-size="12" fill="#fff" font-weight="800">Bridge needed to reach new highs · ~${recoveryLabel||'—'}</text>
+    </g>
+
+    <!-- market decline & recovery curve in the canyon -->
+    <path d="${marketPath} L${rightX},${floorY} L${leftX},${floorY} Z" fill="url(#${uid}-valley)" opacity=".65"/>
+    <path d="${marketPath}" fill="none" stroke="#aab6c6" stroke-width="2" stroke-dasharray="2 5"/>
+    <text x="${(leftX+span*0.42).toFixed(1)}" y="${troughY+22}" text-anchor="middle" font-size="10.5" fill="#8494a8" font-weight="700">market bottoms, then climbs back</text>
+
+    <!-- support piers + gap -->
+    ${piers}
+    ${gap}
+
+    <!-- the client's bridge deck (colored by status) -->
+    <line class="deck-draw" x1="${leftX}" y1="${deckY}" x2="${endX.toFixed(1)}" y2="${deckY}"
+          stroke="url(#${uid}-deck)" stroke-width="11" stroke-linecap="round"
+          style="--len:${deckLen}"/>
+    <line x1="${leftX}" y1="${deckY-5.5}" x2="${endX.toFixed(1)}" y2="${deckY-5.5}" stroke="#fff" stroke-width="1.4" opacity=".35"/>
+
+    <!-- left cliff (TODAY) -->
+    <path d="M0,${deckY-6} L${leftX},${deckY-6} L${leftX},${floorY} L0,${floorY} Z" fill="url(#${uid}-cliff)"/>
+    <g transform="translate(${(leftX-58).toFixed(1)},${deckY-58})">
+      <text x="0" y="0" font-size="11" fill="#1b2b3a" font-weight="800">TODAY</text>
+      <text x="0" y="14" font-size="9.5" fill="#6b7e96" font-weight="600">market peak</text>
+    </g>
+    <circle cx="${(leftX-10).toFixed(1)}" cy="${deckY-8}" r="4.5" fill="#cda561"/>
+
+    <!-- right cliff (NEW HIGHS) -->
+    <path d="M${rightX},${deckY-6} L${W},${deckY-6} L${W},${floorY} L${rightX},${floorY} Z" fill="url(#${uid}-cliff)"/>
+    <g transform="translate(${(rightX+12).toFixed(1)},${deckY-58})">
+      <text x="0" y="0" font-size="11" fill="#1b2b3a" font-weight="800">NEW HIGHS</text>
+      <text x="0" y="14" font-size="9.5" fill="#6b7e96" font-weight="600">full recovery</text>
+    </g>
+    <!-- goal flag -->
+    <line x1="${(rightX+4).toFixed(1)}" y1="${deckY-8}" x2="${(rightX+4).toFixed(1)}" y2="${deckY-30}" stroke="#1b2b3a" stroke-width="2"/>
+    <path d="M${(rightX+4).toFixed(1)},${deckY-30} l16,5 l-16,6 Z" fill="#1d7a50"/>
+
+    <!-- ticks -->
+    ${ticks}
+
+    <!-- coverage pill -->
+    ${coveragePill}
+  </svg>
+  </div>`;
+}
+
 function buildBridgeSection(assetImpacts, totalMV, scenario) {
-  const fmt$ = n => '$' + Math.abs(Math.round(n)).toLocaleString('en-US');
+  const fmt$ = _bridgeFmt$;
   let stableNow = 0;
   const stableRows = [];
   assetImpacts.forEach(a => {
@@ -287,27 +496,28 @@ function buildBridgeSection(assetImpacts, totalMV, scenario) {
   });
   const stablePct = totalMV > 0 ? (stableNow / totalMV * 100) : 0;
   const rec = parseRecoveryYears(scenario);
-  _stBridgeData = { stableNow, recoveryYears: rec.years, recoveryLabel: rec.label };
+  _stBridgeData = { stableNow, stablePct, recoveryYears: rec.years, recoveryLabel: rec.label };
 
   // No stable assets at all — turn it into the planning conversation
   if (stableNow <= 0) {
     _stBridgeData = null;
     return `
     <div class="st-bridge">
-      <div class="st-bridge-title">🛡️ The Calm Side of the Portfolio</div>
-      <div class="st-bridge-sub">Not everything falls in a downturn — cash, bonds, CDs, and annuities historically hold steady while stocks recover.</div>
-      <div class="st-bridge-msg partial">This portfolio currently holds <strong>no allocation to stable assets</strong> (cash, money market, bonds, CDs, or annuities). In a scenario like this, any income need would have to be met by selling investments at depressed prices. That is the strongest reason to carve out a stability sleeve now, while markets are calm — before the next downturn arrives.</div>
+      <div class="st-bridge-title">🌉 Can You Cross the Downturn?</div>
+      <div class="st-bridge-sub">In a downturn, the goal is to fund income from stable assets — cash, bonds, CDs, annuities — until stocks climb back to new highs, so nothing gets sold at the bottom.</div>
+      <div class="st-bridge-msg partial">This portfolio currently holds <strong>no allocation to stable assets</strong> (cash, money market, bonds, CDs, or annuities). In a scenario like this, there is no bridge — any income need would have to be met by selling investments at depressed prices. That is the strongest reason to build a stability sleeve now, while markets are calm, before the next downturn arrives.</div>
     </div>`;
   }
 
   const rowsHTML = stableRows.sort((a,b) => b.mv - a.mv)
     .map(r => `${r.cat}: ${fmt$(r.mv)}`)
     .join(' &nbsp;·&nbsp; ');
+  const recLbl = rec.label ? '~' + rec.label : 'the recovery';
 
   return `
     <div class="st-bridge">
-      <div class="st-bridge-title">🛡️ The Calm Side of the Portfolio</div>
-      <div class="st-bridge-sub">While the numbers above show the storm, this is the shelter — the portion of the portfolio in stable assets, valued as-is with no growth assumed.</div>
+      <div class="st-bridge-title">🌉 Can You Cross the Downturn?</div>
+      <div class="st-bridge-sub">The bridge is the stable side of the portfolio — valued as-is, with no growth assumed. The question is simple: could it fund the client's income for the <strong>${recLbl}</strong> it historically took this market to climb back to new highs, without ever selling stocks at a low?</div>
 
       <div class="st-scenario-header" style="margin-bottom:14px">
         <div class="st-stat-card" style="border-top:3px solid #16a34a;background:#fff">
@@ -321,9 +531,9 @@ function buildBridgeSection(assetImpacts, totalMV, scenario) {
           <div class="st-stat-sub">held in stable assets</div>
         </div>
         <div class="st-stat-card" style="border-top:3px solid var(--teal);background:#fff">
-          <div class="st-stat-label">Distribution Bridge</div>
-          <div class="st-stat-value recovery" id="st-bridge-years">—</div>
-          <div class="st-stat-sub" id="st-bridge-years-sub">enter distributions below</div>
+          <div class="st-stat-label">Bridge Needed</div>
+          <div class="st-stat-value recovery">${rec.label ? '~' + (rec.years >= 1 ? Math.round(rec.years) + 'y' : Math.round(rec.years*12)+'mo') : '—'}</div>
+          <div class="st-stat-sub">${rec.label ? 'to reach new highs' : 'recovery time'}</div>
         </div>
       </div>
 
@@ -344,60 +554,93 @@ function buildBridgeSection(assetImpacts, totalMV, scenario) {
 function updateStressBridge() {
   const box = document.getElementById('st-bridge-result');
   if (!box || !_stBridgeData) return;
+  injectBridgeStyles();
   const amtEl  = document.getElementById('st-bridge-amt');
   const freqEl = document.getElementById('st-bridge-freq');
   if (amtEl)  _stDistAmount = amtEl.value;
   if (freqEl) _stDistFreq   = freqEl.value;
 
-  const fmt$ = n => '$' + Math.abs(Math.round(n)).toLocaleString('en-US');
+  const fmt$ = _bridgeFmt$;
   const amt = parseFloat(_stDistAmount);
   const { stableNow, recoveryYears, recoveryLabel } = _stBridgeData;
-  const yearsCard = document.getElementById('st-bridge-years');
-  const yearsSub  = document.getElementById('st-bridge-years-sub');
 
   if (!amt || amt <= 0) {
-    if (yearsCard) yearsCard.textContent = '—';
-    if (yearsSub)  yearsSub.textContent  = 'enter distributions below';
-    box.innerHTML = `<div class="st-bridge-msg info">Enter the client's regular distributions above to see how long their stable holdings alone could carry their income through a downturn like this.</div>`;
+    box.innerHTML = `<div class="st-bridge-msg info">Enter the client's regular distributions above to see whether their stable holdings alone could bridge them all the way through a downturn like this.</div>`;
     return;
   }
 
-  const annual = _stDistFreq === 'monthly' ? amt * 12 : amt;
-  const years  = stableNow / annual;
-  const yrsTxt = years >= 40 ? '40+ yrs' : (years >= 10 ? Math.round(years) + ' yrs' : years.toFixed(1) + ' yrs');
-  const yrsTxtLong = years >= 40 ? '40+ years' : (years >= 10 ? Math.round(years) + ' years' : years.toFixed(1) + ' years');
-  const monthsTxt = Math.round(years * 12);
+  const annual        = _stDistFreq === 'monthly' ? amt * 12 : amt;
+  const coverageYears = stableNow / annual;
+  const ratio         = recoveryYears ? coverageYears / recoveryYears : null;
+  const st            = bridgeStatus(ratio);
+  const coverageLabel = _bridgeYearsLabel(coverageYears);
 
-  if (yearsCard) yearsCard.textContent = yrsTxt;
-  if (yearsSub)  yearsSub.textContent  = 'of distributions covered at ' + fmt$(annual) + '/yr';
+  // Needed / have / gap in dollars and years
+  const neededDollars   = recoveryYears ? annual * recoveryYears : null;
+  const haveDollars     = stableNow;
+  const gapDollars      = neededDollars != null ? haveDollars - neededDollars : null; // + surplus / − short
+  const gapYears        = recoveryYears != null ? coverageYears - recoveryYears : null;
+  const shortfallYears  = (gapYears != null && gapYears < 0) ? _bridgeYearsShort(-gapYears) : null;
+  const shortfallDollars= (gapDollars != null && gapDollars < 0) ? fmt$(gapDollars) : null;
 
-  let barHTML = '', cls, msg;
+  const scene = recoveryYears ? buildBridgeScene({
+    ratio, coverageYears, recoveryYears, recoveryLabel, coverageLabel,
+    neededDollars, haveDollars,
+    shortfallDollars, shortfallYears, st
+  }) : '';
 
-  if (recoveryYears) {
-    const covPct = Math.min(years / recoveryYears * 100, 100);
-    barHTML = `
-      <div style="margin-top:14px">
-        <div style="display:flex;justify-content:space-between;gap:8px;font-size:.58rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#3d6b52;margin-bottom:5px;flex-wrap:wrap">
-          <span>Income covered by stable assets: ${yrsTxtLong}</span>
-          <span>Historical recovery: ~${recoveryLabel}</span>
-        </div>
-        <div style="height:12px;background:#d5e6da;border-radius:6px;overflow:hidden">
-          <div style="height:100%;width:${covPct.toFixed(0)}%;background:linear-gradient(90deg,#1a6b4a,#16a34a);border-radius:6px;transition:width .6s cubic-bezier(.4,0,.2,1)"></div>
-        </div>
-      </div>`;
-    if (years >= recoveryYears) {
-      cls = 'ok';
-      msg = `<strong>✓ Fully bridged.</strong> At ${fmt$(annual)} per year, the stable side of the portfolio alone — assuming no growth at all — could cover roughly <strong>${yrsTxtLong}</strong> of distributions. That is longer than the ~${recoveryLabel} it historically took markets to reach new highs after this event. In a downturn like this, income could come entirely from stable assets while the growth side is given the time it needs to recover. Nothing would have to be sold at depressed prices.`;
-    } else {
-      cls = 'partial';
-      msg = `At ${fmt$(annual)} per year, stable holdings could cover roughly <strong>${yrsTxtLong}</strong> of distributions (about ${monthsTxt} months) against a historical recovery of ~${recoveryLabel} — assuming no growth at all on those assets. That is a meaningful head start, and a good reason to talk now, while markets are calm, about setting aside a bit more on the stable side so income never has to come from selling stocks at low prices.`;
-    }
+  // Plain-language verdict + supporting numbers
+  let headline, msg;
+  if (recoveryYears == null) {
+    headline = 'A real cushion';
+    msg = `At ${fmt$(annual)} per year, the stable side of the portfolio alone — with no growth assumed — could fund about <strong>${coverageLabel}</strong> of the client's income. That lets the rest of the portfolio ride out an extended downturn without being sold at the wrong time.`;
+  } else if (st.key === 'ok') {
+    headline = '✓ You can cross';
+    msg = `At ${fmt$(annual)} a year, the stable assets alone could fund roughly <strong>${coverageLabel}</strong> of income with no growth at all — comfortably past the <strong>~${recoveryLabel}</strong> this market took to reach new highs. In a repeat of this, the client's income could come entirely from the calm side of the portfolio while stocks are given time to recover. Nothing would have to be sold at a low.`;
+  } else if (st.key === 'close') {
+    headline = 'Right on the edge';
+    msg = `At ${fmt$(annual)} a year, the stable assets cover about <strong>${coverageLabel}</strong> — just about the <strong>~${recoveryLabel}</strong> this market took to recover. It works, but there's little room to spare. While markets are calm is the right time to talk about widening the bridge a little, so the client is never forced to sell stocks at the wrong moment.`;
   } else {
-    cls = 'ok';
-    msg = `At ${fmt$(annual)} per year, the stable side of the portfolio alone — assuming no growth at all — could cover roughly <strong>${yrsTxtLong}</strong> of distributions, a real cushion that lets the rest of the portfolio ride out an extended downturn without being sold at the wrong time.`;
+    headline = 'There\'s a gap';
+    msg = `At ${fmt$(annual)} a year, the stable assets cover about <strong>${coverageLabel}</strong>, but this market historically took <strong>~${recoveryLabel}</strong> to reach new highs — leaving roughly <strong>${_bridgeYearsShort(-(gapYears))}</strong>${shortfallDollars ? ' (about ' + shortfallDollars + ')' : ''} where income would have to come from selling investments at depressed prices. That's exactly the risk we can address now, while markets are calm, by moving a bit more onto the stable side of the portfolio.`;
   }
 
-  box.innerHTML = barHTML + `<div class="st-bridge-msg ${cls}">${msg}</div>`;
+  // Needed-vs-have readout cards
+  const readout = recoveryYears ? `
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:14px">
+      <div style="background:#f7f9fc;border:1px solid #e4e9f0;border-radius:10px;padding:11px 13px">
+        <div style="font-size:.56rem;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:#8494a8">Bridge needed</div>
+        <div style="font-size:1.02rem;font-weight:800;color:#1b2b3a;margin-top:2px">${fmt$(neededDollars)}</div>
+        <div style="font-size:.6rem;color:#6b7e96;margin-top:1px">${recoveryLabel} of income</div>
+      </div>
+      <div style="background:#f7f9fc;border:1px solid #e4e9f0;border-radius:10px;padding:11px 13px">
+        <div style="font-size:.56rem;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:#8494a8">Bridge you have</div>
+        <div style="font-size:1.02rem;font-weight:800;color:${st.deck};margin-top:2px">${fmt$(haveDollars)}</div>
+        <div style="font-size:.6rem;color:#6b7e96;margin-top:1px">covers ${coverageLabel}</div>
+      </div>
+      <div style="background:${st.pale};border:1px solid ${st.accent}33;border-radius:10px;padding:11px 13px">
+        <div style="font-size:.56rem;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:${st.accent}">${gapDollars >= 0 ? 'Surplus' : 'Shortfall'}</div>
+        <div style="font-size:1.02rem;font-weight:800;color:${st.accent};margin-top:2px">${gapDollars >= 0 ? '+' : '−'}${fmt$(gapDollars)}</div>
+        <div style="font-size:.6rem;color:${st.accent};margin-top:1px">${gapYears >= 0 ? '+' : '−'}${_bridgeYearsShort(Math.abs(gapYears))} vs. needed</div>
+      </div>
+    </div>` : '';
+
+  const chip = recoveryYears ? `
+    <div class="st-bridge-verdict">
+      <span class="st-bridge-chip" style="background:${st.deck}">${st.icon} ${st.label}</span>
+      <span style="font-size:.7rem;color:#6b7e96;font-weight:600">Bridge covers ${coverageLabel} of a ~${recoveryLabel} recovery</span>
+    </div>` : '';
+
+  const legend = recoveryYears ? `
+    <div class="st-bridge-legend">
+      <span><i style="background:#1d7a50"></i> More than enough</span>
+      <span><i style="background:#c2410c"></i> Right on the edge</span>
+      <span><i style="background:#c0392b"></i> Short of what's needed</span>
+    </div>` : '';
+
+  box.innerHTML = scene + chip + readout +
+    `<div class="st-bridge-msg ${st.key === 'ok' ? 'ok' : 'partial'}" style="margin-top:14px"><strong>${headline}.</strong> ${msg}</div>` +
+    legend;
 }
 
 function exportStressTest(btn) {
