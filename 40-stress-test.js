@@ -299,7 +299,7 @@ function _bridgeYearsShort(y) {
 function bridgeStatus(ratio) {
   if (ratio == null || ratio >= 1.10) {
     return { key:'ok',    deck:'#1d7a50', deck2:'#16a34a', accent:'#1d7a50', pale:'#e9f6ef',
-             sky1:'#eaf5ee', sky2:'#f7fbf8', label:'More than enough', tag:'You can cross', icon:'✓' };
+             sky1:'#eaf5ee', sky2:'#f7fbf8', label:'More than enough', tag:'Well prepared', icon:'✓' };
   }
   if (ratio >= 0.90) {
     return { key:'close', deck:'#c2410c', deck2:'#ea6a1f', accent:'#c2410c', pale:'#fdecdf',
@@ -517,9 +517,9 @@ function buildBridgeSection(assetImpacts, totalMV, scenario) {
     _stBridgeData = null;
     return `
     <div class="st-bridge">
-      <div class="st-bridge-title">🌉 Can You Cross the Downturn?</div>
-      <div class="st-bridge-sub">In a downturn, the goal is to fund income from stable assets — cash, bonds, CDs, annuities — until stocks climb back to new highs, so nothing gets sold at the bottom.</div>
-      <div class="st-bridge-msg partial">This portfolio currently holds <strong>no allocation to stable assets</strong> (cash, money market, bonds, CDs, or annuities). In a scenario like this, there is no bridge — any income need would have to be met by selling investments at depressed prices. That is the strongest reason to build a stability sleeve now, while markets are calm, before the next downturn arrives.</div>
+      <div class="st-bridge-title">🛡️ The Calm Side of the Portfolio</div>
+      <div class="st-bridge-sub">Every downturn eventually passes. The plan is to lean on the calm, stable side of the portfolio — cash, bonds, CDs, annuities — to keep the client's income steady while stocks recover, so nothing has to be sold at the bottom.</div>
+      <div class="st-bridge-msg partial">This portfolio currently holds <strong>no allocation to stable assets</strong> (cash, money market, bonds, CDs, or annuities). In a scenario like this, income would have to be met by selling investments at depressed prices. That is the strongest reason to build a calm, stable side now, while markets are steady, so the client is prepared and reassured well before the next downturn arrives.</div>
     </div>`;
   }
 
@@ -530,8 +530,8 @@ function buildBridgeSection(assetImpacts, totalMV, scenario) {
 
   return `
     <div class="st-bridge">
-      <div class="st-bridge-title">🌉 Can You Cross the Downturn?</div>
-      <div class="st-bridge-sub">The bridge is the stable side of the portfolio — valued as-is, with no growth assumed. The question is simple: could it fund the client's income for the <strong>${recLbl}</strong> it historically took this market to climb back to new highs, without ever selling stocks at a low?</div>
+      <div class="st-bridge-title">🛡️ The Calm Side of the Portfolio</div>
+      <div class="st-bridge-sub">Downturns are unsettling, but they pass — and the client doesn't have to ride them out selling stocks at a low. This is the calm, stable side of the portfolio — valued as-is, with no growth assumed — and here's how far it could carry the client's income through the <strong>${recLbl}</strong> this market historically took to recover, while everything else has time to climb back.</div>
 
       <div class="st-scenario-header" style="margin-bottom:14px">
         <div class="st-stat-card" style="border-top:3px solid #16a34a;background:#fff">
@@ -612,7 +612,7 @@ function updateStressBridge() {
     const mult = recoveryYears > 0 ? coverageYears / recoveryYears : null;
     const multTxt = (mult && mult >= 1.5) ? ` — about <strong>${mult >= 10 ? Math.round(mult) : mult.toFixed(1)}× the bridge this event required</strong>` : '';
     const cushionTxt = gapYears > 0 ? ` That's roughly <strong>${_bridgeYearsShort(gapYears)} of cushion beyond</strong> the point the market reached new highs.` : '';
-    headline = '✓ More than enough to cross';
+    headline = '✓ Well prepared to ride this out';
     msg = `At ${fmt$(annual)} a year, the stable assets alone could fund roughly <strong>${coverageLabel}</strong> of income with no growth at all${multTxt}, comfortably past the <strong>~${recoveryLabel}</strong> this market took to reach new highs.${cushionTxt} In a repeat of this, income could come entirely from the calm side of the portfolio while stocks are given time to recover — nothing would have to be sold at a low.`;
   } else if (st.key === 'close') {
     headline = 'Right on the edge';
