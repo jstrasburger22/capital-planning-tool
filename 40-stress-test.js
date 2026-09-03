@@ -631,6 +631,158 @@ function updateStressBridge() {
     legend;
 }
 
+
+let _stRAData = null;
+// ── Risk Alignment (portfolio risk score vs. manually-entered client tolerance) ──
+let _stToleranceScore = '';
+
+// Risk color scale (mirrors the analyzer's riskColor thresholds) so numbers match.
+function _raRiskColor(s) {
+  s = parseInt(s);
+  if (isNaN(s)) return '#6b7e96';
+  if (s <= 25) return '#2563a8';
+  if (s <= 40) return '#22a06b';
+  if (s <= 60) return '#6b7e96';
+  if (s <= 75) return '#d4820a';
+  return '#c0392b';
+}
+
+// Prefer the analyzer's displayed overall score (accounts for manual overrides & cash);
+// fall back to a market-value-weighted average of the active holdings' risk scores.
+function getPortfolioRiskScore() {
+  const el = (typeof document !== 'undefined') ? document.getElementById('az-score') : null;
+  if (el) {
+    const v = parseInt((el.textContent || '').replace(/[^0-9]/g, ''));
+    if (!isNaN(v) && v > 0) return v;
+  }
+  const hs = (typeof getActiveDDHoldings === 'function') ? getActiveDDHoldings() : [];
+  let num = 0, den = 0;
+  hs.forEach(h => {
+    const mv = Math.abs(parseFloat(h.market_value) || 0);
+    const rs = parseFloat(h.risk_score);
+    if (mv > 0 && !isNaN(rs)) { num += rs * mv; den += mv; }
+  });
+  return den > 0 ? Math.round(num / den) : null;
+}
+
+function injectRAStyles() {
+  if (typeof document === 'undefined' || document.getElementById('st-ra-styles')) return;
+  const s = document.createElement('style');
+  s.id = 'st-ra-styles';
+  s.textContent = `
+    .st-ra{margin-top:24px;background:#fff;border:1px solid #e4e9f0;border-radius:16px;padding:22px 24px;box-shadow:0 2px 14px rgba(20,40,70,.05)}
+    .st-ra-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:16px}
+    .st-ra-title{font-family:'Playfair Display',serif;font-size:1.15rem;font-weight:700;color:var(--navy,#1b2b3a);display:flex;align-items:center;gap:9px}
+    .st-ra-badge{font-size:.72rem;font-weight:800;letter-spacing:.04em;text-transform:uppercase;padding:7px 15px;border-radius:30px}
+    .st-ra-cards{display:grid;grid-template-columns:1fr 1fr 1.7fr;gap:14px}
+    @media(max-width:720px){.st-ra-cards{grid-template-columns:1fr 1fr}.st-ra-narr{grid-column:1/-1}}
+    .st-ra-card{background:#f8fafc;border:1px solid #eef2f7;border-radius:12px;padding:16px 18px;text-align:center;display:flex;flex-direction:column;align-items:center;justify-content:center}
+    .st-ra-lbl{font-size:.62rem;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:#8494a8;margin-bottom:6px}
+    .st-ra-num{font-family:'Playfair Display',serif;font-size:2.6rem;font-weight:700;line-height:1}
+    .st-ra-sub{font-size:.66rem;color:#8494a8;margin-top:7px}
+    .st-ra-input{font-family:'Playfair Display',serif;font-size:2.6rem;font-weight:700;line-height:1;width:100%;max-width:120px;text-align:center;border:none;border-bottom:2px dashed #cfd8e3;background:transparent;padding:0 0 2px;color:#1b2b3a}
+    .st-ra-input:focus{outline:none;border-bottom-color:var(--gold,#cda561)}
+    .st-ra-input::-webkit-outer-spin-button,.st-ra-input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+    .st-ra-narr{text-align:left;align-items:flex-start;justify-content:center;font-size:.82rem;line-height:1.6;color:#3d4b5e;background:#fbfcfe}
+    .st-ra-scale{margin-top:26px;padding:0 4px}
+    .st-ra-barwrap{position:relative;height:12px;margin:34px 0 30px}
+    .st-ra-bar{position:absolute;inset:0;border-radius:7px;background:linear-gradient(90deg,#2b6cb0 0%,#2f9e6b 33%,#e0b020 60%,#d4820a 78%,#c0392b 100%)}
+    .st-ra-pin{position:absolute;top:-5px;width:3px;height:22px;background:#1b2b3a;border-radius:2px;transform:translateX(-50%)}
+    .st-ra-mark{position:absolute;font-size:.68rem;font-weight:800;white-space:nowrap;transform:translateX(-50%)}
+    .st-ra-mark.port{top:-30px;color:#1b2b3a}
+    .st-ra-mark.port:after{content:'';position:absolute;left:50%;top:16px;width:2px;height:12px;background:currentColor;transform:translateX(-50%)}
+    .st-ra-mark.tol{top:26px;color:#5a6a80}
+    .st-ra-empty{font-size:.8rem;color:#8494a8;text-align:center;padding:8px 0 2px}
+  `;
+  document.head.appendChild(s);
+}
+
+function buildRiskAlignmentSection() {
+  const port = getPortfolioRiskScore();
+  _stRAData = { port };
+  if (port == null) { _stRAData = null; return ''; }
+  const tolVal = _stToleranceScore !== '' ? ` value="${_stToleranceScore}"` : '';
+  return `
+    <div class="st-ra">
+      <div class="st-ra-head">
+        <div class="st-ra-title">🎯 Risk Alignment</div>
+        <div class="st-ra-badge" id="st-ra-badge" style="display:none"></div>
+      </div>
+      <div class="st-ra-cards">
+        <div class="st-ra-card">
+          <div class="st-ra-lbl">Portfolio Risk Score</div>
+          <div class="st-ra-num" style="color:${_raRiskColor(port)}">${port}</div>
+          <div class="st-ra-sub">what they own today</div>
+        </div>
+        <div class="st-ra-card">
+          <div class="st-ra-lbl">Client Risk Tolerance</div>
+          <input id="st-ra-tol" class="st-ra-input" type="number" min="1" max="99" step="1" placeholder="—"${tolVal} oninput="updateRiskAlignment()">
+          <div class="st-ra-sub">manually entered target</div>
+        </div>
+        <div class="st-ra-card st-ra-narr" id="st-ra-narr">Enter the client's risk tolerance score (from the questionnaire) to compare it against what their portfolio is actually taking on.</div>
+      </div>
+      <div class="st-ra-scale" id="st-ra-scale"></div>
+    </div>`;
+}
+
+function updateRiskAlignment() {
+  if (typeof document === 'undefined' || !_stRAData) return;
+  injectRAStyles();
+  const tolEl = document.getElementById('st-ra-tol');
+  if (tolEl) _stToleranceScore = tolEl.value;
+  const port = _stRAData.port;
+  const tol = parseInt(_stToleranceScore);
+  const badge = document.getElementById('st-ra-badge');
+  const narr = document.getElementById('st-ra-narr');
+  const scale = document.getElementById('st-ra-scale');
+
+  if (isNaN(tol) || tol < 1) {
+    if (badge) badge.style.display = 'none';
+    if (narr) narr.innerHTML = "Enter the client's risk tolerance score (from the questionnaire) to compare it against what their portfolio is actually taking on.";
+    if (scale) scale.innerHTML = '';
+    return;
+  }
+
+  const delta = port - tol;              // + = portfolio riskier than tolerance
+  const mag = Math.abs(delta);
+  let col, pale, badgeTxt, msg;
+
+  if (mag <= 5) {
+    col = '#1d7a50'; pale = '#e9f6ef';
+    badgeTxt = 'In Line With Tolerance';
+    msg = `The portfolio's risk is <strong>well aligned</strong> with the client's stated tolerance of ${tol}. What they own matches how much risk they've told you they're comfortable taking — a good place to confirm the plan and move on.`;
+  } else if (delta > 5) {
+    if (delta > 15) { col = '#c0392b'; pale = '#fdeaea'; }
+    else            { col = '#c2410c'; pale = '#fdecdf'; }
+    badgeTxt = `${delta} pts Above Tolerance`;
+    msg = `The portfolio is taking <strong>${delta} points more risk</strong> than the client's stated tolerance of ${tol}. In a sharp downturn it may fall further than they're emotionally prepared for — a strong, objective starting point for a rebalancing conversation.`;
+  } else {
+    col = '#2563a8'; pale = '#e8f0fa';
+    badgeTxt = `${mag} pts Below Tolerance`;
+    msg = `The portfolio is carrying <strong>${mag} points less risk</strong> than the client's stated tolerance of ${tol}. That's a comfortable, conservative place to be — though it's worth confirming they aren't leaving long-term growth on the table relative to what they're willing to accept.`;
+  }
+
+  if (badge) {
+    badge.style.display = '';
+    badge.textContent = badgeTxt;
+    badge.style.color = col;
+    badge.style.background = pale;
+  }
+  if (narr) narr.innerHTML = msg;
+
+  if (scale) {
+    const pPort = Math.max(0, Math.min(100, port));
+    const pTol = Math.max(0, Math.min(100, tol));
+    scale.innerHTML =
+      `<div class="st-ra-barwrap">
+        <div class="st-ra-bar"></div>
+        <div class="st-ra-mark port" style="left:${pPort}%;color:${_raRiskColor(port)}">Portfolio ${port}</div>
+        <div class="st-ra-pin" style="left:${pTol}%"></div>
+        <div class="st-ra-mark tol" style="left:${pTol}%">Tolerance ${tol}</div>
+      </div>`;
+  }
+}
+
 function exportStressTest(btn) {
   const contentEl = document.getElementById('st-scenario-content');
   if (!contentEl || !contentEl.innerHTML.trim()) return;
@@ -870,6 +1022,7 @@ function renderScenario(key) {
   const stat3Sub   = isBull ? scenario.period          : 'for diversified portfolios';
   const bridgeHTML = isBull ? '' : buildBridgeSection(assetImpacts, totalMV, scenario);
   if (isBull) _stBridgeData = null;
+  const riskAlignHTML = buildRiskAlignmentSection();
 
   content.innerHTML = `
     <div style="margin-bottom:18px;display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px">
@@ -903,6 +1056,7 @@ function renderScenario(key) {
     <div class="st-asset-grid">${barsHTML}</div>
 
     <div class="st-takeaway" style="border-left:3px solid ${accentColor}"><strong>Key Takeaway:</strong> ${scenario.takeaway}</div>
+    ${riskAlignHTML}
     ${bridgeHTML}
     <div style="font-size:.6rem;color:var(--slate);margin-top:12px;line-height:1.5">* Estimates based on historical asset class index returns. Actual portfolio performance will vary. This analysis is for illustrative and advisory discussion purposes only and does not constitute investment advice.</div>
   `;
@@ -914,6 +1068,7 @@ function renderScenario(key) {
     });
   }, 60);
   updateStressBridge();
+  updateRiskAlignment();
 }
 
 function renderCustomScenario() {
@@ -980,6 +1135,7 @@ function runCustomScenario() {
 
   const customBridgeHTML = weightedDrawdown < 0 ? buildBridgeSection(assetImpacts, totalMV, null) : '';
   if (weightedDrawdown >= 0) _stBridgeData = null;
+  const customRiskAlignHTML = buildRiskAlignmentSection();
   const result = document.getElementById('st-custom-result');
   result.innerHTML = `
     <div class="st-scenario-header" style="margin-bottom:20px">
@@ -1000,6 +1156,7 @@ function runCustomScenario() {
     </div>
     <div style="font-size:.62rem;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--slate);margin-bottom:12px">Asset Class Impact</div>
     <div class="st-asset-grid">${barsHTML}</div>
+    ${customRiskAlignHTML}
     ${customBridgeHTML}
     <div style="font-size:.6rem;color:var(--slate);margin-top:12px;line-height:1.5">* Custom scenario using your defined inputs. For illustrative and advisory discussion purposes only.</div>
   `;
@@ -1010,6 +1167,7 @@ function runCustomScenario() {
     });
   }, 60);
   updateStressBridge();
+  updateRiskAlignment();
 }
 
 
