@@ -330,11 +330,11 @@ function injectBridgeStyles() {
   document.head.appendChild(s);
 }
 
-/* Builds the SVG bridge scene.
-   The x-axis is TIME. The "storm zone" (todayX -> recX) is the recovery period
-   the market needed. A short bridge stops inside the storm (gap shown). A strong
-   bridge crosses onto safe green land and KEEPS GOING — surplus is exaggerated on
-   a compressed scale so a huge cushion visibly dwarfs what was required.
+/* Builds the SVG bridge scene as a stacked TWO-BAR comparison.
+   Both bars share the same left origin (today) and the same time scale.
+   Upper bar  = the client's calm-side bridge (status-colored), which extends
+   PAST the lower bar when they have a surplus (overshoot on a compressed scale).
+   Lower bar  = "what this downturn needed" (the underwater / recovery span).
    opts = { ratio, coverageYears, recoveryYears, recoveryLabel, coverageLabel,
             neededDollars, haveDollars, shortfallDollars, shortfallYears, st } */
 let _stSceneSeq = 0;
@@ -342,158 +342,129 @@ function buildBridgeScene(opts) {
   const { ratio, coverageYears, recoveryYears, recoveryLabel, coverageLabel, st } = opts;
   const uid = 'brg' + (++_stSceneSeq);
 
-  // Canvas
-  const W = 760, H = 330;
-  const deckY   = 150;      // bridge deck
-  const todayX  = 92;       // "today" — bridge origin
-  const rightX  = 726;      // drawable right edge
-  const stripTop = 168, stripBot = 250;   // ground/water strip
-  const baseY   = stripBot;
+  const W = 760, H = 208;
+  const todayX = 96, rightX = 728;
+  const span = rightX - todayX;
 
-  // Storm zone = the recovery period. Fixed slice of the canvas so it reads the same
-  // scenario to scenario; surplus lives in the remaining space to the right.
-  const stormFrac = 0.42;
-  const recX   = todayX + (rightX - todayX) * stormFrac;   // "new highs" point
-  const surplusW = rightX - recX;
+  // "Needed" bar length is a fixed, readable slice; surplus lives to the right.
+  const neededFrac = 0.42;
+  const neededEndX = todayX + span * neededFrac;
+  const surplusW = rightX - neededEndX;
 
-  const r = (ratio == null) ? 6 : ratio;   // treat "no recovery data" as very strong
+  const r = (ratio == null) ? 6 : ratio;
   const complete = r >= 1;
 
-  // Where the client's bridge ends.
-  //  ratio <= 1  -> linear inside the storm zone (short of new highs)
-  //  ratio  > 1  -> crosses onto land, extends via 1 - 1/ratio (asymptotic, exaggerated)
-  let beamEndX;
-  if (r <= 1) beamEndX = todayX + (recX - todayX) * Math.max(r, 0.04);
-  else        beamEndX = recX + surplusW * (1 - 1 / r);
-  beamEndX = Math.min(beamEndX, rightX - 3);
+  // Client bar end: linear inside the needed span if short; compressed overshoot if long.
+  let barEndX;
+  if (r <= 1) barEndX = todayX + (neededEndX - todayX) * Math.max(r, 0.05);
+  else        barEndX = neededEndX + surplusW * (1 - 1 / r);
+  barEndX = Math.min(barEndX, rightX - 2);
+
+  // Lane geometry
+  const barH = 34;
+  const cTop = 38, cBot = cTop + barH, cCY = cTop + barH / 2;   // client bar
+  const nTop = 120, nBot = nTop + barH, nCY = nTop + barH / 2;  // needed bar
+  const tickY = nBot + 8;
 
   const surplusYears = (recoveryYears != null && coverageYears > recoveryYears) ? coverageYears - recoveryYears : 0;
   const cushionLbl = surplusYears > 0 ? _bridgeYearsShort(surplusYears) : '';
   const multiple = (recoveryYears && recoveryYears > 0) ? coverageYears / recoveryYears : null;
-  const multipleLbl = (multiple && multiple >= 1.3) ? (multiple >= 10 ? Math.round(multiple) : multiple.toFixed(1)) + '×' : null;
+  const multLbl = (multiple && multiple >= 1.5) ? (multiple >= 10 ? Math.round(multiple) : multiple.toFixed(1)) + '×' : null;
 
-  // ---- ground strip: storm water (left) + safe green land (right) ----
-  const wave = (x0, x1, y) => {
-    let d = `M${x0},${y}`;
-    const seg = 22; let up = true;
-    for (let x = x0; x < x1; x += seg) { d += ` Q${(x+seg/2).toFixed(1)},${(y+(up?-6:6))} ${Math.min(x+seg,x1).toFixed(1)},${y}`; up = !up; }
-    return d;
-  };
-  const stormWater = `${wave(todayX, recX, stripTop)} L${recX},${stripBot} L${todayX},${stripBot} Z`;
-  const safeLand   = `M${recX},${stripTop} L${rightX},${stripTop} L${rightX},${stripBot} L${recX},${stripBot} Z`;
+  // deck planks on the client bar (subtle)
+  let planks = '';
+  for (let x = todayX + 16; x < barEndX - 6; x += 22)
+    planks += `<line x1="${x.toFixed(1)}" y1="${cTop+3}" x2="${x.toFixed(1)}" y2="${cBot-3}" stroke="#ffffff" stroke-width="1" opacity=".18"/>`;
 
-  // ---- support piers under the built portion that sits over water ----
-  const overWaterEnd = Math.min(beamEndX, recX);
-  let piers = '';
-  const nP = Math.max(1, Math.round((overWaterEnd - todayX) / 95));
-  for (let i = 1; i <= nP; i++) {
-    const px = todayX + (overWaterEnd - todayX) * (i / (nP + 1));
-    piers += `<line x1="${px.toFixed(1)}" y1="${deckY+6}" x2="${px.toFixed(1)}" y2="${stripBot-4}" stroke="#9fb0c4" stroke-width="2.5" opacity=".5"/>`;
-  }
+  // water ripples on the needed bar
+  let ripples = '';
+  for (let x = todayX + 14; x < neededEndX - 8; x += 30)
+    ripples += `<path d="M${x.toFixed(1)},${nCY} q6,-4 12,0 t12,0" fill="none" stroke="#ffffff" stroke-width="1.2" opacity=".33"/>`;
 
-  // ---- year ticks: linear only inside the storm zone (0..recovery) ----
+  // linear year ticks under the needed bar (honest: needed span is linear)
   let ticks = '';
   if (recoveryYears && recoveryYears >= 1.5) {
     const R = Math.round(recoveryYears), step = R > 6 ? 2 : 1;
     for (let t = 0; t <= R; t += step) {
-      const x = todayX + (recX - todayX) * (t / recoveryYears);
-      ticks += `<line x1="${x.toFixed(1)}" y1="${stripBot}" x2="${x.toFixed(1)}" y2="${stripBot+7}" stroke="#b9c4d4" stroke-width="1"/>` +
-               `<text x="${x.toFixed(1)}" y="${stripBot+19}" text-anchor="middle" font-size="9.5" fill="#8494a8" font-weight="700">${t}y</text>`;
+      const x = todayX + (neededEndX - todayX) * (t / recoveryYears);
+      ticks += `<line x1="${x.toFixed(1)}" y1="${tickY}" x2="${x.toFixed(1)}" y2="${tickY+6}" stroke="#b9c4d4" stroke-width="1"/>` +
+               `<text x="${x.toFixed(1)}" y="${tickY+18}" text-anchor="middle" font-size="9.5" fill="#8494a8" font-weight="700">${t}y</text>`;
     }
   } else {
-    ticks = `<text x="${todayX}" y="${stripBot+19}" text-anchor="middle" font-size="9.5" fill="#8494a8" font-weight="700">now</text>` +
-            `<text x="${recX.toFixed(1)}" y="${stripBot+19}" text-anchor="middle" font-size="9.5" fill="#8494a8" font-weight="700">${recoveryLabel||''}</text>`;
+    ticks = `<text x="${todayX}" y="${tickY+18}" text-anchor="middle" font-size="9.5" fill="#8494a8" font-weight="700">now</text>` +
+            `<text x="${neededEndX.toFixed(1)}" y="${tickY+18}" text-anchor="middle" font-size="9.5" fill="#8494a8" font-weight="700">${recoveryLabel||''}</text>`;
   }
 
-  // ---- cushion (surplus) highlight beyond new highs ----
-  let cushion = '', cushionBanner = '';
-  if (complete && beamEndX > recX + 4) {
-    // chevrons marching into the safe zone
+  // cushion (surplus) or shortfall marker in the client lane
+  let cushion = '', marker = '';
+  if (complete && barEndX > neededEndX + 3) {
     let chev = '';
-    for (let x = recX + 14; x < beamEndX - 8; x += 26) {
-      chev += `<path d="M${x.toFixed(1)},${deckY-6} l7,6 l-7,6" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" opacity=".75"/>`;
-    }
-    cushion = `<rect x="${recX.toFixed(1)}" y="${deckY-9}" width="${(beamEndX-recX).toFixed(1)}" height="18" rx="9" fill="#12833f" opacity=".18"/>` + chev;
-    // green bracket + label under the surplus run
-    const midC = (recX + beamEndX) / 2;
-    cushionBanner =
-      `<line x1="${recX.toFixed(1)}" y1="${deckY+22}" x2="${beamEndX.toFixed(1)}" y2="${deckY+22}" stroke="#12833f" stroke-width="1.5"/>` +
-      `<line x1="${recX.toFixed(1)}" y1="${deckY+18}" x2="${recX.toFixed(1)}" y2="${deckY+26}" stroke="#12833f" stroke-width="1.5"/>` +
-      `<line x1="${beamEndX.toFixed(1)}" y1="${deckY+18}" x2="${beamEndX.toFixed(1)}" y2="${deckY+26}" stroke="#12833f" stroke-width="1.5"/>` +
-      `<g transform="translate(${midC.toFixed(1)},${deckY+40})"><rect x="-92" y="-13" width="184" height="24" rx="12" fill="#12833f"/>` +
-      `<text x="0" y="4" text-anchor="middle" font-size="11.5" fill="#fff" font-weight="800">+${cushionLbl} of cushion${multipleLbl ? ' · ' + multipleLbl : ''}</text></g>`;
+    for (let x = neededEndX + 14; x < barEndX - 8; x += 24)
+      chev += `<path d="M${x.toFixed(1)},${cCY-6} l7,6 l-7,6" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" opacity=".8"/>`;
+    cushion = `<rect x="${neededEndX.toFixed(1)}" y="${cTop}" width="${(barEndX-neededEndX).toFixed(1)}" height="${barH}" rx="7" fill="#12833f" opacity=".16"/>` + chev;
+    const midC = (neededEndX + barEndX) / 2;
+    marker =
+      `<line x1="${neededEndX.toFixed(1)}" y1="${cBot+6}" x2="${barEndX.toFixed(1)}" y2="${cBot+6}" stroke="#12833f" stroke-width="1.5"/>` +
+      `<line x1="${neededEndX.toFixed(1)}" y1="${cBot+2}" x2="${neededEndX.toFixed(1)}" y2="${cBot+10}" stroke="#12833f" stroke-width="1.5"/>` +
+      `<line x1="${barEndX.toFixed(1)}" y1="${cBot+2}" x2="${barEndX.toFixed(1)}" y2="${cBot+10}" stroke="#12833f" stroke-width="1.5"/>` +
+      `<g transform="translate(${midC.toFixed(1)},${cBot+24})"><rect x="-88" y="-12" width="176" height="22" rx="11" fill="#12833f"/>` +
+      `<text x="0" y="4" text-anchor="middle" font-size="11" fill="#fff" font-weight="800">+${cushionLbl} beyond what's needed${multLbl?' · '+multLbl:''}</text></g>`;
+  } else if (!complete) {
+    const midG = (barEndX + neededEndX) / 2;
+    marker =
+      `<line x1="${barEndX.toFixed(1)}" y1="${cCY}" x2="${neededEndX.toFixed(1)}" y2="${cCY}" stroke="${st.accent}" stroke-width="2.5" stroke-dasharray="3 6" opacity=".9"/>` +
+      `<g transform="translate(${midG.toFixed(1)},${cBot+24})"><rect x="-66" y="-12" width="132" height="22" rx="11" fill="${st.accent}"/>` +
+      `<text x="0" y="4" text-anchor="middle" font-size="11" fill="#fff" font-weight="800">${opts.shortfallYears||''} short of it</text></g>`;
   }
 
-  // ---- shortfall gap (bridge stops over water) ----
-  let gap = '';
-  if (!complete) {
-    const midG = (beamEndX + recX) / 2;
-    gap = `<line x1="${beamEndX.toFixed(1)}" y1="${deckY}" x2="${recX.toFixed(1)}" y2="${deckY}" stroke="${st.accent}" stroke-width="3" stroke-dasharray="3 7" opacity=".9"/>` +
-          `<g transform="translate(${midG.toFixed(1)},${deckY+40})"><rect x="-70" y="-13" width="140" height="24" rx="12" fill="${st.accent}"/>` +
-          `<text x="0" y="4" text-anchor="middle" font-size="11.5" fill="#fff" font-weight="800">${opts.shortfallYears||''} short</text></g>`;
-  }
-
-  const deckLen = (beamEndX - todayX).toFixed(1);
-
-  // ---- end pill (client's total bridge) ----
-  const pillTxt = `Your bridge · ${coverageLabel}`;
-  const pillW = Math.max(104, pillTxt.length * 6.7);
-  let pillX = beamEndX;
-  pillX = Math.max(todayX + pillW/2 - 20, Math.min(pillX, rightX - pillW/2 + 20));
+  // end pill for the client bar
+  const pillTxt = coverageLabel;
+  const pillW = Math.max(74, pillTxt.length * 8 + 26);
+  let pillX = Math.min(Math.max(barEndX, todayX + pillW/2), rightX - pillW/2);
   const endPill =
-    `<g transform="translate(${pillX.toFixed(1)},${deckY-40})">` +
-    `<rect x="${(-pillW/2).toFixed(1)}" y="-16" width="${pillW.toFixed(1)}" height="27" rx="13.5" fill="${st.deck}"/>` +
-    `<text x="0" y="3" text-anchor="middle" font-size="12" fill="#fff" font-weight="800">${pillTxt}</text>` +
-    `<path d="M${(beamEndX-pillX).toFixed(1)},11 l-6,0 l6,8 l6,-8 Z" fill="${st.deck}"/></g>`;
+    `<g transform="translate(${pillX.toFixed(1)},${cCY})">` +
+    `<rect x="${(-pillW/2).toFixed(1)}" y="-13" width="${pillW.toFixed(1)}" height="26" rx="13" fill="#fff" opacity=".92"/>` +
+    `<text x="0" y="5" text-anchor="middle" font-size="12.5" fill="${st.deck}" font-weight="800">${pillTxt}</text></g>`;
 
   return `
-  <div class="st-bridge-scene" role="img" aria-label="Bridge across the downturn: your stable assets cover ${coverageLabel} against a recovery of ${recoveryLabel||'the downturn'}.">
+  <div class="st-bridge-scene" role="img" aria-label="Comparison: the calm side of the portfolio covers ${coverageLabel}, versus the ${recoveryLabel||'recovery'} this downturn historically needed.">
   <svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" font-family="'Nunito Sans',system-ui,sans-serif">
     <defs>
-      <linearGradient id="${uid}-sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${st.sky1}"/><stop offset="1" stop-color="${st.sky2}"/></linearGradient>
       <linearGradient id="${uid}-deck" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="${st.deck}"/><stop offset="1" stop-color="${st.deck2}"/></linearGradient>
+      <linearGradient id="${uid}-water" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5b8bb0"/><stop offset="1" stop-color="#3f6b8e"/></linearGradient>
     </defs>
 
-    <rect x="0" y="0" width="${W}" height="${H}" fill="url(#${uid}-sky)"/>
+    <!-- safe-ground tint behind the surplus stretch of the client bar -->
+    ${complete && barEndX > neededEndX + 3 ? `<rect x="${neededEndX.toFixed(1)}" y="${cTop-8}" width="${(barEndX-neededEndX+2).toFixed(1)}" height="${barH+16}" rx="8" fill="#eaf6ee"/>` : ''}
 
-    <!-- ground: storm water + safe land -->
-    <path d="${stormWater}" fill="#f7dcd5"/>
-    <path d="${wave(todayX, recX, stripTop)}" fill="none" stroke="#e4a89b" stroke-width="1.5" opacity=".8"/>
-    <path d="${safeLand}" fill="#e2f2e8"/>
-    <line x1="${recX.toFixed(1)}" y1="${stripTop}" x2="${rightX}" y2="${stripTop}" stroke="#bfe3cd" stroke-width="1.5"/>
-    <text x="${(todayX+(recX-todayX)/2).toFixed(1)}" y="${stripBot-14}" text-anchor="middle" font-size="10" fill="#b06a5c" font-weight="700">market underwater</text>
-    <text x="${(recX+surplusW/2).toFixed(1)}" y="${stripBot-14}" text-anchor="middle" font-size="10" fill="#2f8256" font-weight="700">recovered · new highs & beyond</text>
+    <!-- lane labels -->
+    <text x="${todayX}" y="${cTop-12}" font-size="10.5" fill="#1b2b3a" font-weight="800">YOUR CALM-SIDE BRIDGE</text>
+    <text x="${todayX}" y="${nTop-10}" font-size="10.5" fill="#3f6b8e" font-weight="800">WHAT THIS DOWNTURN NEEDED</text>
 
-    <!-- needed bracket (top) -->
-    <line x1="${todayX}" y1="46" x2="${recX.toFixed(1)}" y2="46" stroke="#9aa7b8" stroke-width="1.5"/>
-    <line x1="${todayX}" y1="40" x2="${todayX}" y2="52" stroke="#9aa7b8" stroke-width="1.5"/>
-    <line x1="${recX.toFixed(1)}" y1="40" x2="${recX.toFixed(1)}" y2="52" stroke="#9aa7b8" stroke-width="1.5"/>
-    <g transform="translate(${(todayX+(recX-todayX)/2).toFixed(1)},46)"><rect x="-118" y="-15" width="236" height="23" rx="11.5" fill="#1b2b3a"/>
-      <text x="0" y="1" text-anchor="middle" font-size="11" fill="#fff" font-weight="800">Bridge this event needed · ~${recoveryLabel||'—'}</text></g>
-
-    ${piers}
-
-    <!-- bridge deck -->
-    <line class="deck-draw" x1="${todayX}" y1="${deckY}" x2="${beamEndX.toFixed(1)}" y2="${deckY}" stroke="url(#${uid}-deck)" stroke-width="12" stroke-linecap="round" style="--len:${deckLen}"/>
-    <line x1="${todayX}" y1="${(deckY-6).toFixed(1)}" x2="${beamEndX.toFixed(1)}" y2="${(deckY-6).toFixed(1)}" stroke="#fff" stroke-width="1.5" opacity=".35"/>
+    <!-- client bridge bar -->
+    <rect x="${todayX}" y="${cTop}" width="${(barEndX-todayX).toFixed(1)}" height="${barH}" rx="7" fill="url(#${uid}-deck)"/>
+    <rect x="${todayX}" y="${cTop}" width="${(barEndX-todayX).toFixed(1)}" height="6" rx="3" fill="#fff" opacity=".25"/>
+    ${planks}
     ${cushion}
-    ${gap}
+    ${marker}
+    ${endPill}
 
-    <!-- today pillar -->
-    <circle cx="${todayX}" cy="${deckY}" r="6" fill="#1b2b3a"/>
-    <g transform="translate(${todayX},${deckY-58})"><text x="0" y="0" text-anchor="middle" font-size="11" fill="#1b2b3a" font-weight="800">TODAY</text>
-      <text x="0" y="13" text-anchor="middle" font-size="9" fill="#6b7e96" font-weight="600">market peak</text></g>
+    <!-- needed (underwater) bar -->
+    <rect x="${todayX}" y="${nTop}" width="${(neededEndX-todayX).toFixed(1)}" height="${barH}" rx="7" fill="url(#${uid}-water)"/>
+    ${ripples}
+    <g transform="translate(${neededEndX.toFixed(1)},${nCY})"><rect x="${(-((recoveryLabel||'').length*6.3+30)/2).toFixed(1)}" y="-12" width="${((recoveryLabel||'').length*6.3+30).toFixed(1)}" height="24" rx="12" fill="#fff" opacity=".9"/>
+      <text x="0" y="4" text-anchor="middle" font-size="11.5" fill="#2f5a7a" font-weight="800">~${recoveryLabel||'—'}</text></g>
 
-    <!-- new-highs flag -->
-    <line x1="${recX.toFixed(1)}" y1="${deckY+2}" x2="${recX.toFixed(1)}" y2="${stripTop}" stroke="#2f8256" stroke-width="1.5" stroke-dasharray="2 4" opacity=".8"/>
-    <line x1="${recX.toFixed(1)}" y1="${deckY-2}" x2="${recX.toFixed(1)}" y2="${deckY-30}" stroke="#1b2b3a" stroke-width="2"/>
-    <path d="M${recX.toFixed(1)},${deckY-30} l17,5 l-17,6 Z" fill="#2f8256"/>
-    <g transform="translate(${recX.toFixed(1)},${deckY-58})"><text x="0" y="0" text-anchor="middle" font-size="10.5" fill="#1b2b3a" font-weight="800">NEW HIGHS</text>
-      <text x="0" y="13" text-anchor="middle" font-size="9" fill="#6b7e96" font-weight="600">~${recoveryLabel||''}</text></g>
+    <!-- TODAY origin -->
+    <line x1="${todayX}" y1="${cTop-6}" x2="${todayX}" y2="${nBot+4}" stroke="#1b2b3a" stroke-width="2"/>
+    <circle cx="${todayX}" cy="${cTop-6}" r="3.5" fill="#1b2b3a"/>
+
+    <!-- "new highs" finish line linking both bars -->
+    <line x1="${neededEndX.toFixed(1)}" y1="${cTop-6}" x2="${neededEndX.toFixed(1)}" y2="${nBot+4}" stroke="#2f8256" stroke-width="1.5" stroke-dasharray="2 4" opacity=".85"/>
+    <path d="M${neededEndX.toFixed(1)},${cTop-6} l14,4 l-14,5 Z" fill="#2f8256"/>
+    <text x="${(neededEndX+8).toFixed(1)}" y="${cTop-8}" font-size="9.5" fill="#2f8256" font-weight="700">new highs reached</text>
 
     ${ticks}
-    ${cushionBanner}
-    ${endPill}
   </svg>
   </div>`;
 }
