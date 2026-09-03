@@ -2932,6 +2932,8 @@ function renderPortfolio(data) {
       </div>
     </div>
 
+    <div id="az-risk-align"></div>
+
     <!-- ── SAVE BUTTONS (top of results) ── -->
     <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
       <button onclick="saveAsImage('view-analyzer','az-img-btn-top','portfolio-analysis')" id="az-img-btn-top"
@@ -3497,6 +3499,10 @@ function recalcPortfolio() {
   if (barEl)      { barEl.style.width = overallScore + '%'; barEl.style.background = riskCol; }
   if (pinEl)      { pinEl.style.left = overallScore + '%'; }
   if (totalBalEl) { totalBalEl.textContent = portfolioTotalValue > 0 ? fmt$(portfolioTotalValue) : '—'; }
+
+  // ── Risk Alignment: portfolio score (above) vs. manually-entered client tolerance ──
+  const azRA = document.getElementById('az-risk-align');
+  if (azRA) { azRA.innerHTML = buildRiskAlignmentSection(); updateRiskAlignment(); }
 
   // ── Update asset allocation grid ──
   const grandTotal = totalEq + totalFi + totalCash + totalAlt + totalAnnuity + totalStructured || 1;
@@ -4838,6 +4844,7 @@ function injectRAStyles() {
 }
 
 function buildRiskAlignmentSection() {
+  injectRAStyles();
   const port = getPortfolioRiskScore();
   _stRAData = { port };
   if (port == null) { _stRAData = null; return ''; }
@@ -5047,7 +5054,6 @@ function renderScenario(key) {
   const stat3Sub   = isBull ? scenario.period          : 'for diversified portfolios';
   const bridgeHTML = isBull ? '' : buildBridgeSection(assetImpacts, totalMV, scenario);
   if (isBull) _stBridgeData = null;
-  const riskAlignHTML = buildRiskAlignmentSection();
 
   content.innerHTML = `
     <div style="margin-bottom:18px;display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px">
@@ -5084,7 +5090,6 @@ function renderScenario(key) {
     <div class="st-asset-grid">${barsHTML}</div>
 
     <div class="st-takeaway" style="border-left:3px solid ${accentColor}"><strong>Key Takeaway:</strong> ${scenario.takeaway}</div>
-    ${riskAlignHTML}
     ${bridgeHTML}
     <div style="font-size:.6rem;color:var(--slate);margin-top:12px;line-height:1.5">* Estimates based on historical asset class index returns. Actual portfolio performance will vary. This analysis is for illustrative and advisory discussion purposes only and does not constitute investment advice.</div>
   `;
@@ -5096,7 +5101,6 @@ function renderScenario(key) {
     });
   }, 60);
   updateStressBridge();
-  updateRiskAlignment();
 }
 
 function renderCustomScenario() {
@@ -5171,7 +5175,6 @@ function runCustomScenario() {
 
   const customBridgeHTML = weightedDrawdown < 0 ? buildBridgeSection(assetImpacts, totalMV, null) : '';
   if (weightedDrawdown >= 0) _stBridgeData = null;
-  const customRiskAlignHTML = buildRiskAlignmentSection();
   const result = document.getElementById('st-custom-result');
   result.innerHTML = `
     <div class="st-scenario-header" style="margin-bottom:20px">
@@ -5195,7 +5198,6 @@ function runCustomScenario() {
       <div style="font-size:.6rem;color:var(--slate-lt)">weighting · scenario move · dollar impact</div>
     </div>
     <div class="st-asset-grid">${barsHTML}</div>
-    ${customRiskAlignHTML}
     ${customBridgeHTML}
     <div style="font-size:.6rem;color:var(--slate);margin-top:12px;line-height:1.5">* Custom scenario using your defined inputs. For illustrative and advisory discussion purposes only.</div>
   `;
@@ -5206,7 +5208,6 @@ function runCustomScenario() {
     });
   }, 60);
   updateStressBridge();
-  updateRiskAlignment();
 }
 
 
