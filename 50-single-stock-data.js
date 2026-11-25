@@ -1,8 +1,9 @@
 /* ═══════════════════════════════════════════════════════════
-   Capital Planning Wealth Management — Single stock/ETF analyzer, ticker scoring tables and data
+   Capital Planning Wealth Management — Single stock/ETF analyzer, scoring engine v2, ticker scoring tables
    Load order matters: files share one global scope and are loaded
    in numeric order by index.html.
    ═══════════════════════════════════════════════════════════ */
+
 // ══ SINGLE STOCK ANALYZER ══
 
 
@@ -29,7 +30,8 @@ function renderStockResult(d) {
       <div class="sr-metric"><div class="sr-mlbl">Risk Score</div><div class="sr-mval" style="color:${col}">${Math.round(s)} / 100</div></div>
     </div>
     ${d.description ? '<div class="sr-analysis" style="margin-bottom:12px">' + d.description + '</div>' : ''}
-    ${d.analysis    ? '<div class="sr-analysis">' + d.analysis + '</div>' : ''}`;
+    ${d.analysis    ? '<div class="sr-analysis">' + d.analysis + '</div>' : ''}
+    ${d._src ? '<div style="margin-top:10px;font-size:.68rem;color:var(--slate)">Score source: <strong>' + (SCORE_SRC_LABELS[d._src] || d._src) + '</strong>' + (d._src === 'ai' ? ' — not yet in the verified table; confirm before using with clients.' : '') + '</div>' : ''}`;
 }
 
 // ══ TICKER SCORING ══
@@ -39,8 +41,8 @@ function renderStockResult(d) {
 // Refresh cycle: stale entries (6+ months) are re-verified on next lookup.
 
 const TICKER_SCORE_META = {
-  version: '2026.03',
-  reviewed: '2026-03-06',
+  version: '2026.11',
+  reviewed: '2026-11-24',   // Scoring engine v2: verified table first, Treasury funds by duration
   // Set to true to force re-verify ALL tickers via web (use every ~6 months)
   forceRefresh: false
 };
@@ -795,6 +797,28 @@ const TICKER_SCORES = {
   IONQ:97,   // IonQ — quantum computing, highly speculative
   RGTI:97,   // Rigetti Computing — quantum, speculative
   QBTS:97,   // D-Wave Quantum — quantum, speculative
+
+  // ══════════════════════════════════════════════════════════════
+  // NOV 2026 ACCURACY CORRECTIONS — listed last so they override any
+  // earlier duplicate entry for the same ticker.
+  // ══════════════════════════════════════════════════════════════
+  // Money market fund that was scored like an equity fund (74)
+  AGPXX:5, JMST:18,
+  // Leveraged / options ETFs that were under-scored
+  USD:96,    // ProShares Ultra Semiconductors (2x)
+  NAIL:97,   // Direxion 3x Homebuilders
+  DRN:95,    // Direxion 3x Real Estate
+  PFIX:80,   // Simplify Interest Rate Hedge — options on rates, very volatile
+  // Single stocks: firm rule = individual stocks score at or above SPY (74)
+  // because of single-company risk. These defensive names sat below SPY.
+  JNJ:78, PG:78, KO:78, PEP:78, MCD:78, MRK:78, DUK:78, SO:78,
+  WMT:80, COST:80, PFE:80, CMCSA:80, DE:80, T:80, VZ:80, TMUS:80, NEE:80, D:80,
+  AMT:80, PLD:80, O:80, WELL:80, ROK:80,
+  RTX:78, HON:78, LMT:78, NOC:78, GD:78, 'BRK.B':78, 'BRK.A':78,
+  DIS:82, SBUX:82, MMM:82, SPG:82, GLW:82, HPE:84,
+  // Treasury index funds by duration (common in 401k rollovers)
+  VFISX:14, VSBSX:14, SCHO:14, IEI:22, VFITX:27, VSIGX:27, GOVT:26,
+  TLH:32, VUSTX:35, VLGSX:35, FNBGX:35, SCHQ:35,
 };
 
 // ── Client-name extraction from account labels ──
@@ -881,104 +905,408 @@ function isCusip(str) {
   return false;
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// SCORING ENGINE v2 — Nov 2026
+// One resolver is used by EVERY module (analyzer, add-account, single
+// ticker, proposal builder) so the same holding always gets the same score.
+//
+// Order of precedence:
+//   1. Advisor manual override            (h._manualOverride)
+//   2. Verified TICKER_SCORES table       (known tickers always win)
+//   3. Rule-based classification          (cash, annuities, CDs, individual
+//                                           bonds, Treasury funds by duration,
+//                                           structured notes)
+//   4. Session cache / AI estimate
+//   5. Fallback 50                        (flagged in Score Check)
+//
+// Every resolved holding is tagged h._src = 'manual'|'table'|'rule'|'ai'|'fallback'
+// so the Score Check panel can show exactly where each number came from.
+//
+// FIRM RULES KEPT: cash / money market / CDs / fixed & indexed annuities = 5,
+// individual US Treasury securities = 5, variable annuities = 50,
+// structured notes = 30.
+// CHANGED: Treasury & government bond FUNDS are no longer forced to 5 —
+// they are scored by duration (T-bill 5 · short 14 · intermediate 27 · long 37).
+// ══════════════════════════════════════════════════════════════════════
+
+const _FUND_WORDS_RE = /\b(etf|etfs|fund|funds|index|portfolio|ishares|vanguard|spdr|schwab|fidelity|invesco|pimco|blackrock|admiral|investor|instl|institutional|shares|shs|class [a-z0-9]|cl [a-z])\b/i;
+const _COUPON_RE     = /\d+(?:\.\d+)?\s?%/;
+const _TSY_WORD_RE   = /\b(treasury|treasuries|treas|t-bills?|tbills?|t bill|t-notes?|t-bonds?|strips|us govt|u\.s\. govt|united states govt|government|govt)\b/i;
+const _FOREIGN_GOV_RE= /\b(canada|canadian|mexico|mexican|japan|brazil|germany|german|france|french|italy|spain|australia|province|provincial|republic of|kingdom of|sovereign|intl|international|global|world|emerging|ex-us|ex us|foreign)\b/i;
+const _AGENCY_RE     = /\b(fnma|fhlmc|fhlb|ffcb|freddie mac|fannie mae|federal home loan|federal farm credit|ginnie mae|gnma|tennessee valley)\b/i;
+const _HY_RE         = /\b(high yield|hi yld|hi-yld|junk|subordinated|jr sub|pik|convertible|conv)\b/i;
+
+// Phrases that only show up on structured products. Generic words that used to
+// misfire ("linked" → inflation-linked bond funds, "absolute return",
+// "contingent", "floored", "mtn") were removed.
+const _STRUCT_STRONG = [
+  'structured note','structured product','market linked','market-linked','principal protected',
+  'capital protected','autocall','auto-call','auto call','buffer note','buffered note',
+  'barrier note','reverse convertible','reverse exchangeable','equity linked','equity-linked',
+  'index linked note','index-linked note','contingent coupon','contingent income',
+  'contingent interest','trigger','lnkd','lkd to','note lkd','linked to','participation note','phoenix note','phoenix autocall',
+  'enhanced participation','cap note','capped note','dual directional','digital note',
+  'callable yield note','leveraged note','absolute return note'
+];
+
+function _isTradableTicker(t) { return /^[A-Z]{1,5}(\.[A-Z])?$/.test(t || '') && t !== 'CASH'; }
+
+// Does this holding look like a pooled fund (ETF / mutual fund) rather than an
+// individual security?
+function _looksLikeFund(h) {
+  const t    = (h.ticker || '').trim().toUpperCase();
+  const name = h.name || '';
+  const txt  = name + ' ' + (h.type || '');
+  // Coupon / maturity descriptors mean an individual bond or note, not a fund
+  if (_COUPON_RE.test(name) || /\b(due|dtd|b\/e|matures?|maturity)\b/i.test(name)) return false;
+  if (_FUND_WORDS_RE.test(txt)) return true;
+  if (/^[A-Z]{4}X$/.test(t) && !/XX$/.test(t)) return true;   // mutual fund ticker convention
+  return false;
+}
+
+// Years until the latest future date found in a bond description
+function _yearsToMaturity(txt) {
+  const cy = new Date().getFullYear();
+  const years = [];
+  (txt.match(/\b(?:19|20)\d{2}\b/g) || []).forEach(y => years.push(+y));
+  let m;
+  const reDate = /\b\d{1,2}\/\d{1,2}\/(\d{2,4})\b/g;
+  while ((m = reDate.exec(txt))) { let y = +m[1]; if (y < 100) y += 2000; years.push(y); }
+  const rePacked = /%\s*(\d{2})(\d{2})(\d{2})\b/g;              // LPL style "3.250% 022326" = MMDDYY
+  while ((m = rePacked.exec(txt))) years.push(2000 + +m[3]);
+  const future = years.filter(y => y >= cy && y <= cy + 60);
+  return future.length ? Math.max(...future) - cy : null;
+}
+
+// Individual (non-Treasury) bonds: short paper stays at the firm's 10;
+// longer maturities and high-yield credit score higher.
+function _individualBondScore(combined, rawName) {
+  const yrs = _yearsToMaturity(rawName + ' ' + combined);
+  let s = (yrs == null) ? 10 : yrs <= 3 ? 10 : yrs <= 7 ? 13 : yrs <= 12 ? 17 : 22;
+  if (_HY_RE.test(combined)) s += 14;
+  return s;
+}
+
+// Treasury / government bond FUNDS scored by duration (matches the verified table:
+// SGOV 5 · SHY 15 · VGSH 14 · IEF 28 · VGIT 26 · TLT 35 · VGLT 35 · EDV 40)
+function _treasuryFundDuration(s) {
+  s = (s || '').toLowerCase();
+  if (/\b(bills?|ultra[- ]?short|floating|float)\b|0-3 ?mo|0-3 month|1-3 month|0-1 year|money market/.test(s))
+    return { score: 5,  label: 'Treasury Bill / Floating Rate Fund' };
+  if (/\btips\b|inflation/.test(s))
+    return /\bshort\b|0-5|1-5/.test(s) ? { score: 20, label: 'Short-Term TIPS Fund' } : { score: 28, label: 'TIPS Fund' };
+  if (/\b(long|extended|zero coupon|strips)\b|20\+|25\+|10\+|10-20|20-30|25-30/.test(s))
+    return { score: 37, label: 'Long-Term Treasury Fund' };
+  if (/\b(intermediate|interm|int-term)\b|3-7|3-10|5-10|7-10/.test(s))
+    return { score: 27, label: 'Intermediate Treasury Fund' };
+  if (/\bshort\b|short-term|1-3|0-5|1-5/.test(s))
+    return { score: 14, label: 'Short-Term Treasury Fund' };
+  return { score: 26, label: 'Government Bond Fund' };
+}
+
+function _isIndividualTreasury(h, combined) {
+  if (!_TSY_WORD_RE.test(combined) || _FOREIGN_GOV_RE.test(combined)) return false;
+  if (_looksLikeFund(h)) return false;
+  if (/money market|\bmmf\b|sweep/.test(combined)) return false;
+  // "...digital asset treasury company" etc. — a stock, not a Treasury
+  if (/\b(stock|equity|common|adr|inc|corp|company|holdings)\b/.test(combined) && !_COUPON_RE.test(h.name || '')) return false;
+  const t = (h.ticker || '').replace(/\s/g, '');
+  return _COUPON_RE.test(h.name || '') ||
+         /\b(bills?|notes?|nts|bonds?|bds|strips|tips)\b/.test(combined) ||
+         /^912/.test(t) ||                                   // Treasury CUSIPs start with 912
+         /\d{1,2}\/\d{1,2}\/\d{2,4}/.test(h.name || '');
+}
+
+function _structuredHit(combined, type, fundLike) {
+  const isBank = STRUCTURED_ISSUERS.some(b => new RegExp('\\b' + b.replace(/ /g, '\\s+') + '\\b').test(combined));
+  // Defined-outcome / buffer ETFs are funds — not notes (they go to the table or AI, ~45)
+  if (fundLike && !/\bnotes?\b|structured/.test(type)) return { strong: false, isBank };
+  const strong = _STRUCT_STRONG.some(k => combined.includes(k)) ||
+                 /\bfin(?:l|ance)?\s+(?:co\s+)?llc\b/.test(combined) ||      // "JPMorgan Chase Finl Co LLC", "GS Finance LLC"
+                 /\bstructured\b|\bnotes?\b/.test(type) ||
+                 (isBank && /\bnotes?\b|\bnote due\b|\bmtn\b|\bbuffered?\b|\bbarrier\b|\bcapped\b/.test(combined));
+  return { strong, isBank };
+}
+
+function _noteTypeLabel(combined) {
+  return /buffer/.test(combined) ? 'Buffer Note'
+    : /autocall|auto-call|auto call|phoenix/.test(combined) ? 'Autocall Note'
+    : /barrier/.test(combined) ? 'Barrier Note'
+    : /reverse convertible|reverse exchangeable/.test(combined) ? 'Reverse Convertible Note'
+    : /principal protected|capital protected/.test(combined) ? 'Principal Protected Note'
+    : /leveraged|enhanced participation|participation/.test(combined) ? 'Participation Note'
+    : 'Structured Note';
+}
+
 function classifyHolding(h) {
-  const name    = (h.name||'').toLowerCase();
-  const ticker  = (h.ticker||'').trim();
-  const type    = (h.type||'').toLowerCase();
+  const rawName  = (h.name || '').trim();
+  const name     = rawName.toLowerCase();
+  const ticker   = (h.ticker || h.cusip || '').trim().toUpperCase();
+  const type     = (h.type || '').toLowerCase();
   const combined = name + ' ' + type;
+  const fundLike = _looksLikeFund(h);
 
-  // ── CASH / MONEY MARKET / INSURED DEPOSITS → score: 5 ──
-  // Includes: cash, sweeps, money market funds, insured cash accounts, bank deposits
-  if (
-    ticker === 'CASH' || name === 'cash' ||
-    type.includes('money market') || name.includes('money market') ||
-    name.includes('sweep') || name.includes('insured cash') ||
-    name.includes('fdic') || name.includes('bank deposit') ||
-    type.includes('cash') || type.includes('savings')
-  ) return { score:5, type:'Cash / Money Market' };
+  // ── CASH / MONEY MARKET / SWEEP / INSURED DEPOSITS → 5 ──
+  const isMMTicker = /^[A-Z]{3}XX$/.test(ticker);      // money market funds end in "XX" (SPAXX, VMFXX, AGPXX…)
+  const mmWords    = /money market|\bmmkt\b|\bmmf\b|\bsweep\b|insured cash|insured deposit|\bfdic\b|bank deposit|deposit (program|account|sweep)|cash reserves?/.test(combined);
+  const cashLabel  = ticker === 'CASH' || name === 'cash' || /^cash\b/.test(name) ||
+                     (/\bcash\b/.test(type) && !/cash flow|cashflow|cash cow/.test(combined)) ||
+                     /\bsavings\b/.test(type);
+  // Custodians often label ultra-short / muni BOND funds "Cash Alternatives" — those are not cash
+  const bondFundInCashClothing = cashLabel && fundLike && !mmWords && !isMMTicker &&
+        /\b(bond|income|duration|ultra|short|muni|municipal|treasury|floating|credit|enhanced|maturity)\b/.test(name);
+  if (isMMTicker || mmWords || (cashLabel && !bondFundInCashClothing))
+    return { score: 5, type: 'Cash / Money Market' };
 
-  // ── VARIABLE ANNUITIES → score: 50 ──
-  // Variable annuities have real market exposure through subaccounts; treated as moderate risk.
-  // Checked BEFORE the generic annuity catch so variable VAs don't fall through to score 5.
-  const isVariableAnnuity =
-    combined.includes("variable annuity") || combined.includes("variable annuities") ||
-    combined.includes("var annuity") ||
-    type.includes("variable annuity") || type.includes("variable insurance") ||
-    type === "variable" ||   // eMoney exports "Variable" as the asset class for VAs
-    // "variable" + "annuity" anywhere in name (handles "ABC Variable XYZ Annuity")
-    (combined.includes("variable") && (combined.includes("annuity") || combined.includes("annuit"))) ||
-    // VA subaccounts
-    combined.includes("subaccount") || combined.includes("sub-account") || combined.includes("sub account");
-  if (isVariableAnnuity) return { score: 50, type: "Variable Annuity" };
+  // ── VARIABLE ANNUITIES → 50 (checked before the generic annuity rule) ──
+  const isVA = /variable annuit|var annuity|variable insurance|subaccount|sub-account|sub account/.test(combined) ||
+               type.trim() === 'variable' ||                         // eMoney exports "Variable" for VAs
+               (/\bvariable\b/.test(combined) && /annuit/.test(combined));
+  if (isVA) return { score: 50, type: 'Variable Annuity' };
 
-  // ── ANNUITIES → score: 5 ──
-  // Fixed, fixed-indexed, MYGA, structured annuities — all insurance products
-  // Checked BEFORE structured notes — a "structured annuity" is still an annuity
-  const isAnnuity =
-    combined.includes("annuity") || combined.includes("annuitie") ||
-    combined.includes("fixed indexed") || combined.includes("fixed-indexed") ||
-    combined.includes("myga") || combined.includes("multi-year guaranteed") ||
-    combined.includes("variable annuity") || combined.includes("immediate annuity") ||
-    combined.includes("deferred annuity") || combined.includes("income annuity") ||
-    combined.includes("point-to-point") || combined.includes("point to point") ||
-    combined.includes("index annuity") || combined.includes("indexed annuity") ||
-    combined.includes("fia ") || combined.includes("rila") ||
-    type.includes("annuity") || type.includes("insurance product") || type.includes("insurance");
-  if (isAnnuity) return { score:5, type:"Annuity" };
+  // ── FIXED / INDEXED / RILA / MYGA ANNUITIES → 5 ──
+  // (The old rule matched ANY type containing "insurance", which turned insurance-sector
+  //  ETFs and insurance stocks into annuities at 5.)
+  const isAnnuity = /annuit/.test(combined) ||
+        /fixed[- ]indexed|\bmyga\b|multi[- ]year guaranteed|point[- ]to[- ]point|\bfia\b|\brila\b|registered index[- ]linked|insurance (product|contract)/.test(combined) ||
+        (/^\s*(insurance|insurance\/annuity)\s*$/.test(type) && !_isTradableTicker(ticker));
+  if (isAnnuity) return { score: 5, type: 'Annuity' };
 
-  // ── CDs → score: 5 ──
-  // Brokered CDs, callable CDs, market-linked CDs — all treated as conservative cash-like
-  if (
-    CD_KEYWORDS.some(k => combined.includes(k)) ||
-    combined.includes('market linked cd') || combined.includes('market-linked cd') || combined.includes('mlcd')
-  ) return { score:5, type:'CD' };
+  // ── CDs (brokered, callable, market-linked) → 5 ──
+  const isCD = CD_KEYWORDS.some(k => combined.includes(k)) ||
+               /market[- ]linked cd|\bmlcd\b/.test(combined) ||
+               /\bcds?\b/.test(type) ||
+               (!fundLike && /\bcds?\b/.test(name) && (_COUPON_RE.test(rawName) || /\b(bank|bk|na|fsb|ssb)\b/.test(name) || isCusip(ticker)));
+  if (isCD) return { score: 5, type: 'CD' };
 
-  // ── US TREASURIES, GOVT MONEY MARKET, T-BILLS → score: 5 ──
-  // Any US government-issued security is treated as conservative (score 5)
-  const isTreasury =
-    combined.includes('treasury') || combined.includes('t-note') || combined.includes('t-bond') ||
-    combined.includes('t-bill') || combined.includes('tbill') || combined.includes('t bill') ||
-    combined.includes('united states treasury') || combined.includes('us treasury') ||
-    combined.includes('u.s. treasury') || combined.includes('u.s. govt') ||
-    combined.includes('us govt') || combined.includes('united states govt') ||
-    combined.includes('government money market') || combined.includes('govt money market') ||
-    combined.includes('federal money market') ||
-    // Treasury ETFs / tickers
-    ticker === 'BIL' || ticker === 'SHV' || ticker === 'SGOV' || ticker === 'TBLL' ||
-    ticker === 'USFR' || ticker === 'CLTL' || ticker === 'TFLO' || ticker === 'VGSH' ||
-    ticker === 'IEF' || ticker === 'TLT' || ticker === 'GOVT' || ticker === 'SCHO' ||
-    ticker === 'SCHR' || ticker === 'SCHQ' || ticker === 'VGIT' || ticker === 'VGLT';
-  if (isTreasury) return { score:5, type:'US Treasury' };
+  // ── INDIVIDUAL US TREASURY SECURITIES → 5 (firm rule) ──
+  if (_isIndividualTreasury(h, combined)) {
+    return { score: 5, type: /\bbills?\b|t-bill|tbill/.test(combined) ? 'US Treasury Bill' : 'US Treasury' };
+  }
 
-  // ── INDIVIDUAL BONDS → score: 10 ──
-  // Munis, corporates, agency bonds
-  if (BOND_KEYWORDS.some(k => combined.includes(k))) {
-    const bondType = combined.includes('municipal') || combined.includes(' muni') ? 'Municipal Bond'
-      : combined.includes('corporate') ? 'Corporate Bond'
-      : combined.includes('agency') ? 'Agency Bond'
+  // ── TREASURY / GOVERNMENT BOND FUNDS → scored by duration ──
+  if (fundLike && _TSY_WORD_RE.test(combined) && !_FOREIGN_GOV_RE.test(combined) && !/\b(equity|stock)\b/.test(combined)) {
+    const d = _treasuryFundDuration(combined);
+    return { score: d.score, type: d.label, note: 'duration' };
+  }
+
+  const sh = _structuredHit(combined, type, fundLike);
+
+  // ── INDIVIDUAL BONDS (muni, corporate, agency) → 10–36 by maturity & credit ──
+  const looksIndividualBond = !fundLike && !sh.strong && (
+        BOND_KEYWORDS.some(k => combined.includes(k)) || _AGENCY_RE.test(combined) ||
+        (_COUPON_RE.test(rawName) && (
+            /\b(due|dtd|b\/e|mat|matures?|sr|nt|nts|notes?|bds?|bonds?|rev|go|gen oblig|ref|deb|debs)\b/.test(name) ||
+            /\d{1,2}\/\d{1,2}\/\d{2,4}|\b\d{6}\b/.test(rawName) || isCusip(ticker))) ||
+        /^(corporate|municipal|agency|individual) bonds?$/.test(type.trim()));
+  if (looksIndividualBond) {
+    const kind = /municipal|\bmuni\b|\brevs?\b|\bgo\b|gen oblig|authority|\bauth\b|school dist|county|\bcnty\b|\bcity of\b|\bcivic\b|\bimpt\b|\bdorm\b|\btpk\b|turnpike|\bwtr\b|\bswr\b|\bhosp\b|\bisd\b|\bpub\b/.test(combined) ? 'Municipal Bond'
+      : (_AGENCY_RE.test(combined) || /\bagency\b/.test(combined)) ? 'Agency Bond'
+      : /corporate|\bcorp\b|\binc\b|\bco\b|\bllc\b|\bplc\b/.test(combined) ? 'Corporate Bond'
       : 'Individual Bond';
-    return { score:10, type: bondType };
+    return { score: _individualBondScore(combined, rawName), type: kind };
   }
 
-  // ── STRUCTURED NOTES → score: 30 (flat, all types) ──
-  // Includes: buffer notes, autocalls, barrier notes, reverse convertibles,
-  // principal protected notes, any CUSIP-identified or bank-issued note
-  const isBank = STRUCTURED_ISSUERS.some(b => combined.includes(b));
-  const isNote = STRUCTURED_KEYWORDS.some(k => combined.includes(k)) || type.includes('note') || type.includes('structured');
+  // ── STRUCTURED NOTES → 30 (flat, all types) ──
+  if (sh.strong) return { score: 30, type: _noteTypeLabel(combined) };
 
-  if (!isAnnuity && (isCusip(ticker) || (isBank && isNote) || STRUCTURED_KEYWORDS.some(k => combined.includes(k)))) {
-    // Preserve the descriptive type label for display, but score is always 30
-    const noteType = combined.includes('buffer') || combined.includes('buffered') ? 'Buffer Note'
-      : combined.includes('autocall') || combined.includes('phoenix') ? 'Autocall Note'
-      : combined.includes('barrier') ? 'Barrier Note'
-      : combined.includes('reverse convertible') ? 'Reverse Convertible Note'
-      : combined.includes('principal protected') || combined.includes('capital protected') ? 'Principal Protected Note'
-      : combined.includes('leveraged') || combined.includes('enhanced participation') ? 'Participation Note'
-      : 'Structured Note';
-    return { score:30, type: noteType };
-  }
+  // Unknown CUSIP with no other clues — usually a structured note in advisory books.
+  // Scored 30 but flagged in Score Check so the advisor can confirm.
+  if (isCusip(ticker) && !fundLike) return { score: 30, type: _noteTypeLabel(combined), note: 'cusip-only' };
 
   return null;
+}
+
+// ── The single resolver every module uses ──
+function resolveHoldingScore(h) {
+  const t = (h.ticker || '').toUpperCase().trim();
+  const n = parseFloat(h.risk_score);
+  if (h._manualOverride && !isNaN(n)) return { score: Math.round(n), type: h.type, src: 'manual' };
+  if (t && TICKER_SCORES[t] !== undefined) return { score: TICKER_SCORES[t], type: h.type, src: 'table' };
+  const c = classifyHolding(h);
+  if (c) return { score: c.score, type: c.type, src: 'rule', note: c.note };
+  if (h._src === 'fallback') return { score: 50, type: h.type, src: 'fallback' };
+  if (t && _sessionScoreCache[t] !== undefined) return { score: _sessionScoreCache[t], type: h.type, src: 'ai' };
+  if (!isNaN(n) && n > 0) return { score: Math.round(n), type: h.type, src: 'ai' };
+  return { score: 50, type: h.type, src: 'fallback' };
+}
+
+function applyResolvedScore(h) {
+  const r = resolveHoldingScore(h);
+  h.risk_score = r.score;
+  h.risk_level = riskLevelLabel(r.score);
+  if (r.src === 'rule' && r.type) h.type = r.type;     // rules supply a precise label
+  else if (r.src === 'table' && (!h.type || /^(multiple|other|n\/?a|unknown|-+)$/i.test(h.type.trim()))) {
+    const c = classifyHolding(h);                        // e.g. "Multiple" → "Cash / Money Market"
+    if (c && c.type) h.type = c.type;
+  }
+  if (isGenericType(h.type)) {                           // e.g. "Multiple" → "Mid Cap ETF"
+    const cat = inferFundCategory(h);
+    if (cat) h.type = cat;
+  }
+  h._src = r.src;
+  if (r.note) h._srcNote = r.note; else delete h._srcNote;
+  return h;
+}
+
+
+// ══ FUND CATEGORY LABELS ══
+// Custodian exports (LPL especially) often label every fund "Multiple". When the type is
+// generic, infer a readable category from the fund name + score. Display only — scores
+// never change, but the clearer label also improves the stress-test asset mapping.
+const _GENERIC_TYPE_RE = /^\s*(multiple|other|others|n\/?a|unknown|-+|equity|equities|fixed income|etfs?|exchange[- ]traded funds?|mutual funds?|funds?|stocks?|securities|security|open end fund|closed end fund)?\s*$/i;
+function isGenericType(t) { return _GENERIC_TYPE_RE.test(t || ''); }
+
+function inferFundCategory(h) {
+  const nm = (h.name || '').toLowerCase();
+  const tk = (h.ticker || '').toUpperCase();
+  const s  = parseFloat(h.risk_score);
+  const sc = isNaN(s) ? 50 : s;
+  if (!nm) return null;
+  const isETF = /\betfs?\b|ishares|spdr|\bshares trust\b/.test(nm);
+  const isMF  = !isETF && (/\bfund\b|;\s*[a-z0-9]+\s*$|\b(admiral|investor|instl|institutional|class [a-z0-9])\b/.test(nm) || /^[A-Z]{4}X$/.test(tk));
+  const veh   = isETF ? ' ETF' : isMF ? ' Fund' : '';
+  const has   = re => re.test(nm);
+
+  if (/^[A-Z]{3}XX$/.test(tk) || has(/money market|liquid assets|cash reserves|(government|treasury) obligations|cash management/)) return 'Cash / Money Market';
+
+  // Bond categories — only when the score or name says it's really a bond fund
+  if (sc <= 45 || has(/\bbonds?\b/)) {
+    const b =
+      has(/multi[- ]?sector/)                                        ? 'Multi-Sector Bond' :
+      has(/municipal|\bmuni\b|tax[- ](exempt|free)/)                  ? 'Municipal Bond' :
+      has(/high[- ]yield|high income|\bjunk\b|fallen angel/)          ? 'High Yield Bond' :
+      has(/securitized|mortgage|\bmbs\b|\bclo\b|asset[- ]backed/)     ? 'Securitized Bond' :
+      has(/\btips\b|inflation/)                                       ? 'TIPS / Inflation Bond' :
+      has(/floating rate|bank loan|senior loan|leveraged loan/)       ? 'Floating Rate / Bank Loan' :
+      has(/emerging markets? (debt|bond)|\bem debt\b/)                ? 'Emerging Markets Bond' :
+      has(/treasury|government|govt/)                                 ? 'Government Bond' :
+      has(/ultra[- ]?short|short[- ]term|short duration|enhanced cash|short maturity|limited[- ]term/) ? 'Short-Term Bond' :
+      has(/international bond|global bond|world bond|intl bond|global aggregate/) ? 'International Bond' :
+      has(/corporate|investment grade|\bcredit\b/)                    ? 'Corporate Bond' :
+      has(/\bbonds?\b|aggregate|core plus|core fixed|fixed income|total return|\bincome\b/) ? 'Core Bond' : null;
+    if (b) return b + veh;
+  }
+
+  if (!veh && !has(/\b(trust|portfolio|index|strategy)\b/)) {
+    // No fund markers: an individual stock
+    return sc >= 55 && /^[A-Z]{1,5}(\.[A-Z])?$/.test(tk) ? 'Stock' : null;
+  }
+
+  const e =
+    has(/bitcoin|ether(eum)?\b|crypto|digital asset|blockchain/)                 ? 'Crypto' :
+    has(/\bgold\b|silver|precious metal|commodit|\boil\b|natural gas|uranium/)   ? 'Commodities' :
+    has(/real estate|\breit|realty|property/)                                    ? 'Real Estate' :
+    has(/buffer|defined outcome|structured outcome|hedged equity|downside protect/) ? 'Buffered / Defined Outcome' :
+    has(/premium income|covered call|buy[- ]?write|option income|yieldmax|enhanced income/) ? 'Equity Income / Options' :
+    has(/managed futures|market neutral|long[- ]short|multi[- ]strat|merger|event driven|alternative|absolute return/) ? 'Alternatives' :
+    has(/balanced|allocation|target (date|retirement)|retirement 20\d\d|\b20[2-7]\d fund|lifestrategy|moderate growth|conservative growth/) ? 'Balanced / Allocation' :
+    has(/emerging/)                                                              ? 'Emerging Markets Equity' :
+    has(/international|\bintl\b|eafe|ex[- ]?us|developed markets?|foreign|global|world|europe|japan|pacific|overseas|acwi/)
+      ? (has(/value/) ? 'International Value' : has(/small/) ? 'International Small Cap' : 'International Equity') :
+    has(/small[- ]?cap|smallcap|russell 2000|small company|microcap/)            ? 'Small Cap' :
+    has(/mid[- ]?cap|midcap|mid company/)                                        ? 'Mid Cap' :
+    has(/semiconductor|technology|\btech\b|health ?care|biotech|pharma|financials?\b|banks?\b|energy|utilities|industrials?|consumer|communication|materials|innovation|cloud|cyber|robotic|artificial intelligence|\bai\b|clean|infrastructure|aerospace|defense/) ? 'Sector / Thematic' :
+    has(/dividend|equity income|high yield equity|shareholder yield/)            ? 'Dividend Equity' :
+    has(/nasdaq|growth/)                                                         ? 'Large Cap Growth' :
+    has(/value/)                                                                 ? 'Large Cap Value' :
+    has(/s ?& ?p 500|s and p 500|\b500\b|total (stock )?market|large[- ]?cap|blue chip|quality|equal weight|core equity|us equity|stock index|stock market/) ? 'Large Cap Blend' :
+    null;
+  return e ? e + veh : null;
+}
+
+const SCORE_SRC_LABELS = {
+  table: 'Verified ticker table', rule: 'Rule-based (asset type)', ai: 'AI estimate',
+  manual: 'Manual override', fallback: 'Default 50 — no score found'
+};
+
+// ── One asset-class bucket function used by every allocation view ──
+// (Previously each view guessed from the risk score — e.g. anything ≤ 6 was "Cash",
+//  so a mis-scored bond fund also showed up as cash, and "Healthcare" matched "alt".)
+function assetBucket(h) {
+  const t  = (h.type || '').toLowerCase();
+  const nm = (h.name || '').toLowerCase();
+  const s  = parseFloat(h.risk_score);
+  const sc = isNaN(s) ? 50 : s;
+  if (/debit/.test(t)) return 'Debit';
+  if (/annuit/.test(t)) return 'Annuities';
+  if (/structured|buffer note|autocall|barrier note|reverse convertible|participation note|principal protected/.test(t)) return 'Structured Notes';
+  const notCashFlow = !/cash flow|cashflow|cash cow/.test(t + ' ' + nm);
+  if (/\bcash\b|money market|sweep|\bcds?\b|certificate of deposit|treasury bill|floating rate fund/.test(t) && notCashFlow && sc <= 8) return 'Cash';
+  if (sc <= 6 && !/bond|fixed|treasury|municipal|muni|income|note/.test(t)) return 'Cash';
+  if (/bond|fixed income|treasury|municipal|\bmuni|securitized|mortgage|\btips\b|government|duration|aggregate|high yield|floating rate|\bclo\b|credit|preferred/.test(t)) return 'Fixed Income';
+  if (sc <= 40) return 'Fixed Income';
+  if (/\balt\b|alternative|commodit|real asset|gold|silver|precious|managed futures|market neutral|long[- ]short|multi[- ]strat|crypto|bitcoin|digital asset/.test(t)) return 'Alternatives';
+  return 'Equities';
+}
+
+// ══ SCORE CHECK — flags holdings whose score deserves a second look ══
+let _scoreCheckOpen = null;   // remembers whether the advisor opened/closed the panel
+function scoreCheckIssues(h) {
+  if (h._manualOverride) return [];                    // advisor already reviewed it
+  const issues = [];
+  const t = (h.type || '').toLowerCase(), nm = (h.name || '').toLowerCase(), txt = t + ' ' + nm;
+  const s = parseFloat(h.risk_score);
+  if (h._src === 'fallback') issues.push('No score could be found — defaulted to 50. Please verify.');
+  if (h._srcNote === 'cusip-only') issues.push('Identified only by its CUSIP — scored as a structured note (30). Confirm what it is.');
+  const cashish = (/money market|sweep|\bcash\b|\bcds?\b|certificate|annuit|\bbills?\b|floating rate fund|government (&|and) agency|govt (&|and) agency/.test(txt) && !/cash flow|cash cow/.test(txt)) ||
+                  /^[A-Z]{3}XX$/.test((h.ticker || '').toUpperCase());
+  if (s <= 6 && !cashish && t !== 'us treasury' &&
+      /bond|income|duration|fixed|treasury|govt|government|municipal|\bmuni|credit|mortgage|securitized|aggregate|\btips\b/.test(txt))
+    issues.push('Bond holding scored like cash (≤ 6). Bond funds usually score 12–40 depending on duration.');
+  if (s < 40 && /\b(stock|equity|growth|small cap|mid cap|large cap|emerging|technology|sector)\b/.test(txt) &&
+      !/annuit|structured|note|buffer|income|bond|hedged|defined outcome/.test(txt))
+    issues.push('Equity holding with an unusually low score.');
+  if (s >= 60 && /\b(bond|treasury|municipal|muni|fixed income|money market)\b/.test(t) &&
+      !/high yield|emerging|convertible|leveraged|inverse|2x|3x/.test(txt))
+    issues.push('Bond / cash holding with an unusually high score.');
+  return issues;
+}
+
+function buildScoreCheckHTML() {
+  if (!_portfolioAccounts || !_portfolioAccounts.length) return '';
+  const counts = { table: 0, rule: 0, ai: 0, manual: 0, fallback: 0 };
+  const flagged = [], aiRows = [];
+  _portfolioAccounts.forEach((acct, ai) => (acct.holdings || []).forEach((h, hi) => {
+    const src = h._manualOverride ? 'manual' : (h._src || 'ai');
+    counts[src] = (counts[src] || 0) + 1;
+    const issues = scoreCheckIssues(h);
+    if (issues.length) flagged.push({ h, ai, hi, msg: issues.join(' ') });
+    else if (src === 'ai') aiRows.push({ h, ai, hi, msg: 'AI estimate — this ticker is not in the verified table yet.' });
+  }));
+  const total = Object.values(counts).reduce((a, b) => a + b, 0);
+  if (!total) return '';
+  const chip = (n, label, bg, col) => n ? `<span style="font-size:.66rem;font-weight:700;padding:3px 10px;border-radius:20px;background:${bg};color:${col};white-space:nowrap">${label} ${n}</span>` : '';
+  const row = (r, warn) => `
+    <div style="display:grid;grid-template-columns:64px 1fr 44px 58px;gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid #eef1f5">
+      <span class="ticker-badge" style="justify-self:start">${r.h.ticker || '—'}</span>
+      <div><div style="font-size:.76rem;font-weight:700;color:var(--navy)">${r.h.name || '—'}</div>
+           <div style="font-size:.68rem;color:${warn ? '#b45309' : '#6b7e96'};margin-top:2px">${warn ? '⚠️ ' : ''}${r.msg}</div></div>
+      <div style="font-family:'Playfair Display',serif;font-weight:700;font-size:1rem;color:${riskColor(parseFloat(r.h.risk_score) || 50)};text-align:center">${Math.round(parseFloat(r.h.risk_score) || 50)}</div>
+      <button class="row-act-btn" style="width:auto;padding:4px 10px" onclick="openRiskEdit(${r.ai},${r.hi},event)">Edit</button>
+    </div>`;
+  const openAttr = (_scoreCheckOpen === null ? flagged.length > 0 : _scoreCheckOpen) ? ' open' : '';
+  return `
+    <details class="section-card" style="margin-bottom:16px;padding:14px 18px" ontoggle="_scoreCheckOpen=this.open"${openAttr}>
+      <summary style="cursor:pointer;display:flex;align-items:center;gap:10px;flex-wrap:wrap;list-style:none">
+        <span style="font-size:.7rem;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--navy)">🔎 Score Check</span>
+        ${flagged.length ? chip(flagged.length, '⚠ To review', '#fff3e0', '#b45309') : chip(1, '✓ Nothing flagged', '#e6f4ed', '#1d7a50').replace(' 1<', '<')}
+        ${chip(counts.table, 'Verified', '#e8f0fa', '#2563a8')}
+        ${chip(counts.rule, 'Rule-based', '#f0f2f5', '#4a5b70')}
+        ${chip(counts.ai, 'AI estimate', '#f5eed8', '#8a6d1f')}
+        ${chip(counts.manual, 'Manual', '#f3eeff', '#7c3aed')}
+        ${chip(counts.fallback, 'Defaulted', '#fde8e8', '#c0392b')}
+        <span style="flex:1"></span><span style="font-size:.62rem;color:var(--slate-lt)">click to show / hide details</span>
+      </summary>
+      <div style="margin-top:12px;font-size:.7rem;color:var(--slate);line-height:1.6">
+        Every score comes from one of five sources: the <strong>verified ticker table</strong>, a <strong>rule</strong> for the asset type
+        (cash, annuities, CDs, individual bonds, structured notes, Treasury funds by duration), an <strong>AI estimate</strong>,
+        a <strong>manual</strong> edit, or a <strong>default</strong> when nothing was found. Holdings that look out of line are listed first.
+      </div>
+      ${flagged.length ? `<div style="margin-top:10px">${flagged.map(r => row(r, true)).join('')}</div>` : ''}
+      ${aiRows.length ? `<div style="margin-top:12px;font-size:.6rem;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:#8a6d1f">AI estimates (${aiRows.length})</div>${aiRows.map(r => row(r, false)).join('')}` : ''}
+      ${!flagged.length && !aiRows.length ? '<div style="margin-top:10px;font-size:.74rem;color:#1d7a50;font-weight:600">✓ Every holding was scored from the verified table, a firm rule, or a manual edit.</div>' : ''}
+    </details>`;
 }
 
 

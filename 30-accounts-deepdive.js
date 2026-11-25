@@ -3,6 +3,7 @@
    Load order matters: files share one global scope and are loaded
    in numeric order by index.html.
    ═══════════════════════════════════════════════════════════ */
+
 // ══ ADD ACCOUNT MODAL ══
 
 let _aaRowScores = {}; // ticker -> {score, type} for newly entered holdings
@@ -80,7 +81,8 @@ ${knownLines ? 'PRE-VERIFIED SCORES (use exactly): ' + knownLines + '\n' : ''}
 HOLDINGS TO SCORE:
 ${holdingsList}
 
-Calibration: SPY=74, QQQ=85, AGG=28, TLT=35, HYG=48, GLD=65, EEM=82, IBIT=95, Money market/cash=5, Variable annuity=50, Other annuities=5, Structured note=30, Bond=20, CD=5
+Calibration: SPY=74, QQQ=85, AGG=28, TLT=35, HYG=48, GLD=65, EEM=82, IBIT=95, Money market/cash=5, Variable annuity=50, Other annuities=5, Structured note=30, CD=5
+Bond FUNDS by duration: T-bill 5, short 13-15, intermediate 26-28, long Treasury 35-42 (a bond fund is never 5 unless it is a T-bill/money market fund). Individual bonds 10-24 by maturity. Individual stocks never below 78.
 
 Return ONLY valid JSON array, no markdown:
 [{"ticker":"","name":"","type":"","risk_score":0}]
@@ -96,7 +98,7 @@ Rules:
       method: 'POST',
       headers: getApiHeaders(),
       body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
+        model: AI_MODEL,
         max_tokens: 2000,
         messages: [{ role: 'user', content: prompt }]
       })
@@ -114,13 +116,12 @@ Rules:
       const ticker = inputs[0].value.trim().toUpperCase();
       const name   = inputs[1].value.trim();
 
-      // Apply classifyHolding overrides first
-      const fakeH = { ticker, name, type: s.type || '', risk_score: s.risk_score };
-      const classified = classifyHolding(fakeH);
-      const finalScore = classified ? classified.score : (TICKER_SCORES[ticker] ?? _sessionScoreCache[ticker] ?? s.risk_score ?? 50);
-      const finalType  = classified ? classified.type : (s.type || '');
+      // Shared engine: verified table → firm rules → AI estimate
+      const rs = resolveHoldingScore({ ticker, name: name || s.name || '', type: s.type || '', risk_score: s.risk_score });
+      const finalScore = rs.score;
+      const finalType  = (rs.src === 'rule' && rs.type) ? rs.type : (s.type || '');
 
-      _aaRowScores[ticker || ('_row_' + i)] = { score: finalScore, type: finalType, name: s.name || name };
+      _aaRowScores[ticker || ('_row_' + i)] = { score: finalScore, type: finalType, name: s.name || name, src: rs.src };
 
       // Fill in name if the user left it blank and AI provided one
       if (!name && s.name) inputs[1].value = s.name;
@@ -163,11 +164,10 @@ function confirmAddAccount() {
     if (!ticker && !name) return; // skip blank rows
 
     const scoreData = _aaRowScores[ticker || ('_row_' + i)] || {};
-    // Apply classifyHolding one more time as safety net
-    const fakeH = { ticker, name, type: scoreData.type || '', risk_score: scoreData.score || 50 };
-    const classified = classifyHolding(fakeH);
-    const finalScore = classified ? classified.score : (TICKER_SCORES[ticker] ?? _sessionScoreCache[ticker] ?? scoreData.score ?? 50);
-    const finalType  = classified ? classified.type : (scoreData.type || 'Unknown');
+    // Shared engine as a safety net (rows the advisor never scored default to 50 and get flagged)
+    const rs = resolveHoldingScore({ ticker, name, type: scoreData.type || '', risk_score: scoreData.score });
+    const finalScore = rs.score;
+    const finalType  = (rs.src === 'rule' && rs.type) ? rs.type : (scoreData.type || 'Unknown');
 
     holdings.push({
       ticker,
@@ -176,7 +176,8 @@ function confirmAddAccount() {
       market_value: mv,
       allocation_pct: 0, // recalculated below
       risk_score: finalScore,
-      risk_level: riskLevelLabel(finalScore)
+      risk_level: riskLevelLabel(finalScore),
+      _src: (rs.src === 'ai' && scoreData.src) ? scoreData.src : rs.src
     });
   });
 
@@ -224,21 +225,27 @@ function inferSubCategory(h) {
   const nm  = (h.name   || '').toLowerCase();
   const tk  = (h.ticker || '').toUpperCase();
   const s   = parseFloat(h.risk_score) || 50;
+  const txt = t + ' ' + nm;
 
-  // Hard-typed first
-  if (t.includes('annuity'))                         return 'Annuities';
-  if (t.includes('structured note') || t.includes('buffer note') ||
-      t.includes('autocall') || t.includes('barrier') ||
-      t.includes('principal protected') || t.includes('participation note')) return 'Structured Notes';
-  if ((t.includes('cash') && !t.includes('cash flow') && !t.includes('cashflow')) || t.includes('money market') || s <= 6) return 'Cash & Money Market';
-  if (t.includes('cd') || nm.includes(' cd ') || nm.includes('certificate')) return 'CDs';
+  // Debit = borrowed money. It doesn't move with markets, so it gets its own
+  // category (impact 0) and losses are measured against the client's NET value.
+  if (/debit/.test(t)) return 'Debit / Margin Balance';
 
-  // Bonds by duration / type
-  if (t.includes('treasury') || tk === 'BIL' || tk === 'SHV' || tk === 'SGOV' || tk === 'TBLL') return 'US Treasuries';
-  if (t.includes('municipal') || t.includes('muni'))                         return 'Municipal Bonds';
-  if (t.includes('high yield') || t.includes('junk') || (t.includes('bond') && s >= 45)) return 'High Yield Bonds';
-  if (t.includes('international') && (t.includes('bond') || t.includes('fixed')))         return 'International Bonds';
-  if (t.includes('bond') || t.includes('fixed income') || t.includes('aggregate') || (s > 8 && s <= 38)) return 'Investment Grade Bonds';
+  const b = assetBucket(h);
+  if (b === 'Annuities')        return 'Annuities';
+  if (b === 'Structured Notes') return 'Structured Notes';
+  if (/\bcds?\b|certificate of deposit/.test(t) || nm.includes('certificate of deposit')) return 'CDs';
+  if (b === 'Cash')             return 'Cash & Money Market';
+
+  // Bonds by type / duration
+  if (b === 'Fixed Income') {
+    if (/treasury|govt|government|\btips\b/.test(txt) || ['BIL','SHV','SGOV','TBLL'].includes(tk))
+      return (s >= 33 || /\blong\b|extended|20\+|strips|zero coupon/.test(txt)) ? 'Long-Term Treasuries' : 'US Treasuries';
+    if (/municipal|\bmuni/.test(txt))                                               return 'Municipal Bonds';
+    if (/high yield|junk|fallen angel|bank loan|leveraged loan/.test(txt) || s >= 45) return 'High Yield Bonds';
+    if (/international|global|emerging|foreign|world/.test(txt))                     return 'International Bonds';
+    return 'Investment Grade Bonds';
+  }
 
   // Equity by geography + style
   if (t.includes('emerging') || nm.includes('emerging'))                     return 'Emerging Markets';
@@ -287,6 +294,8 @@ const DD_COLORS = {
   'Balanced / Target Date':'#7c3aed',
   'Investment Grade Bonds':'#16a34a',
   'US Treasuries':      '#15803d',
+  'Long-Term Treasuries':'#0f5132',
+  'Debit / Margin Balance':'#c0392b',
   'Municipal Bonds':    '#166534',
   'High Yield Bonds':   '#ca8a04',
   'International Bonds':'#4d7c0f',
@@ -355,15 +364,12 @@ function inferPieSleeve(h) {
   const nm = (h.name  || '').toLowerCase();
   const tk = (h.ticker|| '').toUpperCase();
   const s  = parseFloat(h.risk_score) || 50;
-  if (t.includes('annuity'))                                                    return 'Annuities';
-  if (t.includes('structured note') || t.includes('buffer note') ||
-      t.includes('autocall') || t.includes('barrier') ||
-      t.includes('principal protected') || t.includes('participation note'))    return 'Structured Notes';
-  if (s <= 6 || t.includes('money market') || (t.includes('cash') && !t.includes('cash flow') && !t.includes('cashflow')) ||
-      t.includes('cd') || nm.includes('certificate of deposit'))               return 'Cash & Money Market';
-  if (s <= 40 || t.includes('bond') || t.includes('fixed income') ||
-      t.includes('treasury') || t.includes('municipal') ||
-      t.includes('aggregate') || t.includes('high yield'))                     return 'Fixed Income';
+  if (/debit/.test(t))                                                          return 'Debit';
+  const b = assetBucket(h);
+  if (b === 'Annuities')                                                        return 'Annuities';
+  if (b === 'Structured Notes')                                                 return 'Structured Notes';
+  if (b === 'Cash')                                                             return 'Cash & Money Market';
+  if (b === 'Fixed Income')                                                     return 'Fixed Income';
   if (t.includes('real estate') || t.includes('reit') || t.includes('commodity') ||
       t.includes('gold') || t.includes('silver') ||
       ['VNQ','XLRE','IYR','SCHH','GLD','IAU','SLV','PDBC','GSG','DJP','USO'].includes(tk)) return 'Real Assets';
@@ -424,7 +430,9 @@ function renderDDPie() {
   let total = 0;
   holdings.forEach(h => {
     const mv = parseFloat(h.market_value) || 0;
-    buckets[inferPieSleeve(h)] = (buckets[inferPieSleeve(h)] || 0) + mv;
+    if (mv <= 0) return;                        // debit balances aren't a slice of the pie
+    const k = inferPieSleeve(h);
+    buckets[k] = (buckets[k] || 0) + mv;
     total += mv;
   });
   drawDonutSVG(svg, legend, buckets, total, 'PORTFOLIO', 'ALLOCATION');
@@ -438,6 +446,7 @@ function renderDDSubAssets() {
   let total = 0;
   holdings.forEach(h => {
     const mv  = parseFloat(h.market_value) || 0;
+    if (mv <= 0) return;                        // debit shown on the account card, not as a category
     const cat = inferSubCategory(h);
     cats[cat] = (cats[cat] || 0) + mv;
     total += mv;
@@ -520,11 +529,12 @@ Write a 4-paragraph client-facing analysis covering:
 3. Areas to be mindful of — any concentration risks, gaps, or things worth discussing with your advisor (keep this constructive, not alarming)
 4. One forward-looking thought — how this portfolio is positioned for the road ahead
 
+Start with one line formatted exactly as "Subject: <a short, warm subject line>", then a blank line, then the paragraphs.
 Format as plain paragraphs — NO bullet points, NO headers, NO markdown. Write as if speaking directly to the client. Keep it under 280 words total. Be specific to their actual numbers.`;
 
   try {
     const requestBody = {
-      model: 'claude-sonnet-4-6',
+      model: AI_MODEL,
       max_tokens: 600,
       messages: [{ role: 'user', content: prompt }]
     };
@@ -626,4 +636,3 @@ function loadSamplePortfolio() {
   document.getElementById('analyzing-state').style.display = 'none';
   renderPortfolio(sampleData);
 }
-

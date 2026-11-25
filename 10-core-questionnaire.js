@@ -14,6 +14,7 @@ function showView(name) {
     quiz: 'Risk Questionnaire · Bucket Three',
     'quiz-results': 'Risk Assessment Results',
     analyzer: 'Portfolio Analyzer · Advisor Tool',
+    proposal: 'Portfolio Proposal Builder · Advisor Tool',
     models: 'Investment Model Library · Advisor Tool'
   };
   document.getElementById('hdr-sub').textContent = subs[name] || '';
@@ -39,6 +40,17 @@ const QUIZ_QA_MAP = {
 };
 const QW    = { q1:12, q2:10, q3:23, q4:16, q5:12, q6:9, q7:22 };
 const Q_MAX = { q1:5,  q2:4,  q3:5,  q4:5,  q5:5,  q6:5, q7:5  };
+// Lowest point value available on each question (Q2 and Q5 have no 1-point answer)
+const Q_MIN = { q1:1,  q2:2,  q3:1,  q4:1,  q5:2,  q6:1, q7:1  };
+
+// SCORING SCALE — Nov 2026
+// The original formula divided by the maximum only, so the most cautious possible
+// answers still scored 26 ("Moderately Conservative") and the Conservative band was
+// unreachable; 65% of all answer combinations landed Mod. Aggressive or higher.
+// The full-range scale maps the most cautious answers to 1 and the boldest to 100.
+// Set QUIZ_FULL_RANGE = false to restore the original scale.
+const QUIZ_FULL_RANGE = true;
+const QUIZ_SCORING_VERSION = QUIZ_FULL_RANGE ? 'v2 — full-range scale (Nov 2026)' : 'v1 — original scale';
 
 let coupleMode = false;
 let p1Name = 'Spouse 1', p2Name = 'Spouse 2';
@@ -127,14 +139,42 @@ function updateProgress() {
 }
 
 function calcQScore(answers) {
-  let total = 0, maxTotal = 0;
+  let total = 0, maxTotal = 0, minTotal = 0;
   for (const [qKey, weight] of Object.entries(QW)) {
     const ans = answers[qKey];
     if (ans === undefined) return null;
     total    += ans * weight;
     maxTotal += Q_MAX[qKey] * weight;
+    minTotal += Q_MIN[qKey] * weight;
   }
-  return Math.round((total / maxTotal) * 100);
+  if (!QUIZ_FULL_RANGE) return Math.round((total / maxTotal) * 100);
+  return Math.max(1, Math.round((total - minTotal) / (maxTotal - minTotal) * 100));
+}
+
+// ── Answer-consistency checks: contradictions worth discussing before relying on the score ──
+function getQuizFlags(ans, who) {
+  const f = [], p = who ? who + ': ' : '';
+  if (ans.q3 === 1 && (ans.q7 >= 4 || ans.q4 === 5))
+    f.push(p + 'Would sell after a sudden 34% drop (Q3), but also chose ' + (ans.q4 === 5 ? 'the high-swing portfolio (Q4)' : 'a loss tolerance of 15%+ (Q7)') + '. Confirm which reflects how they would really act.');
+  if (ans.q6 === 1 && ans.q7 >= 4)
+    f.push(p + 'Would move to safer investments on a crash prediction (Q6), yet reports tolerating 15%+ annual losses (Q7).');
+  if (ans.q5 >= 4 && (ans.q7 === 1 || ans.q4 === 1))
+    f.push(p + 'Expects 10%+ annual returns (Q5) while wanting ' + (ans.q7 === 1 ? 'minimal losses (Q7)' : 'the low-swing portfolio (Q4)') + '. Return expectations may not match their comfort with risk.');
+  if ((ans.q1 === 1 && ans.q4 === 5) || (ans.q1 >= 4 && ans.q4 === 1))
+    f.push(p + 'Stated priority (Q1) and chosen portfolio (Q4) point in opposite directions.');
+  return f;
+}
+let _quizFlags = [];
+function renderQuizFlags(flags) {
+  const el = document.getElementById('qr-flag');
+  if (!el) return;
+  if (!flags.length) { el.innerHTML = ''; return; }
+  el.innerHTML = `
+    <div class="section-card" style="border-left:4px solid #d4820a;background:#fffaf2">
+      <div class="sc-title" style="color:#b45309">⚑ Responses Worth Discussing</div>
+      <div style="font-size:.78rem;color:#5a4a2a;line-height:1.6;margin-bottom:8px">Some answers point in different directions. Talk these through before finalizing the allocation — they are also noted in the compliance record below.</div>
+      ${flags.map(x => `<div style="font-size:.78rem;color:#3d3220;line-height:1.55;padding:6px 0;border-top:1px dashed #ecd9b5">• ${x}</div>`).join('')}
+    </div>`;
 }
 
 function getEffectiveA2() {
@@ -184,7 +224,16 @@ function renderGuidanceAndFlags(s) {
 }
 
 function showQuizResults() {
-  const s1  = calcQScore(A) || 50;
+  // Every question must be answered — never record a defaulted score
+  const missing = Object.keys(QW).filter(k => A[k] === undefined);
+  if (missing.length) {
+    const n = parseInt(missing[0].slice(1), 10);
+    alert('Please answer question ' + n + ' before viewing results.' + (missing.length > 1 ? ' (' + missing.length + ' questions are unanswered.)' : ''));
+    qGo(n);
+    return;
+  }
+  const s1  = calcQScore(A);
+  _quizFlags = getQuizFlags(A, coupleMode ? p1Name : '');
   const date = new Date().toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'});
   document.getElementById('qr-date').textContent = 'Completed: ' + date;
   showView('quiz-results');
@@ -192,6 +241,7 @@ function showQuizResults() {
   if (coupleMode) {
     const anyDiffering = Object.keys(A2).length > 0 && Object.keys(A2).some(k => A2[k] !== A[k]);
     if (!anyDiffering) {
+      _quizFlags = getQuizFlags(A, '');
       document.getElementById('qr-single-hero').style.display = '';
       document.getElementById('qr-couple-hero').style.display = 'none';
       document.getElementById('qr-score').textContent = s1;
@@ -200,12 +250,17 @@ function showQuizResults() {
         document.getElementById('qr-pin').style.left  = s1 + '%';
       }, 120);
       renderGuidanceAndFlags(s1);
+      renderQuizFlags(_quizFlags);
       renderComplianceBlock(s1, null);
+      window._lastQuizResult = { score: s1, who: p1Name + ' & ' + p2Name, date: new Date().toLocaleDateString('en-US') };
       if (typeof cpCaptureTolerance === 'function') cpCaptureTolerance(s1, null);
       return;
     }
     const s2raw = calcQScore(getEffectiveA2());
     const s2    = s2raw !== null ? s2raw : null;
+    _quizFlags = _quizFlags.concat(getQuizFlags(getEffectiveA2(), p2Name));
+    if (s2 !== null && Math.abs(s1 - s2) >= 15)
+      _quizFlags.push(`${p1Name} (${s1}) and ${p2Name} (${s2}) differ by ${Math.abs(s1 - s2)} points. Decide which score governs joint accounts, and consider separate allocations for individually owned accounts.`);
     document.getElementById('qr-single-hero').style.display = 'none';
     document.getElementById('qr-couple-hero').style.display = 'grid';
     document.getElementById('csc-name-1').textContent  = p1Name;
@@ -228,7 +283,9 @@ function showQuizResults() {
       document.getElementById('qr-pin').style.left = avg + '%';
     }, 120);
     renderGuidanceAndFlags(avg);
+    renderQuizFlags(_quizFlags);
     renderComplianceBlock(s1, s2);
+    window._lastQuizResult = { score: avg, who: p1Name + ' & ' + p2Name + ' (average)', date: new Date().toLocaleDateString('en-US') };
     if (typeof cpCaptureTolerance === 'function') cpCaptureTolerance(s1, s2);
   } else {
     document.getElementById('qr-single-hero').style.display = '';
@@ -239,8 +296,10 @@ function showQuizResults() {
       document.getElementById('qr-pin').style.left  = s1 + '%';
     }, 120);
     renderGuidanceAndFlags(s1);
+    renderQuizFlags(_quizFlags);
     renderComplianceBlock(s1, null);
-    if (typeof cpCaptureTolerance === 'function') cpCaptureTolerance(s1, null);
+    window._lastQuizResult = { score: s1, who: '', date: new Date().toLocaleDateString('en-US') };
+      if (typeof cpCaptureTolerance === 'function') cpCaptureTolerance(s1, null);
   }
 }
 
@@ -253,6 +312,7 @@ function renderComplianceBlock(s1, s2) {
   text += 'Bucket Three Risk Assessment · Compliance Record\n';
   text += '═══════════════════════════════════════════════════════════\n';
   text += 'Date: ' + date + '\n';
+  text += 'Scoring method: ' + QUIZ_SCORING_VERSION + '\n';
   if (coupleMode && anyDiff) {
     text += 'Respondents: ' + p1Name + ' (Score: ' + s1 + ') and ' + p2Name + ' (Score: ' + s2 + ')\n';
     text += 'Note: Individual scores were determined. Where responses differed, both answers are documented below.\n';
@@ -300,6 +360,12 @@ function renderComplianceBlock(s1, s2) {
   }
   text += 'SUGGESTED EQUITY ALLOCATION: ' + g.equity + ' of Bucket Three\n';
   text += 'TARGET RETURN: ' + g.target + ' annualized\n';
+  if (_quizFlags && _quizFlags.length) {
+    text += '───────────────────────────────────────────────────────────\n';
+    text += 'ADVISOR REVIEW — RESPONSES WORTH DISCUSSING:\n';
+    _quizFlags.forEach(x => { text += '  ⚑ ' + x + '\n'; });
+    text += '  Discussed with client: ____________________________\n';
+  }
   text += '───────────────────────────────────────────────────────────\n';
   text += 'Securities & Advisory Services offered through LPL Financial, Member FINRA/SIPC.\n';
   text += 'Capital Planning Wealth Management and LPL Financial are separate entities.\n';
@@ -309,6 +375,8 @@ function renderComplianceBlock(s1, s2) {
 }
 
 function resetQuiz() {
+  _quizFlags = [];
+  renderQuizFlags([]);
   for (const k in A)  delete A[k];
   for (const k in A2) delete A2[k];
   document.querySelectorAll('.opt').forEach(o => o.classList.remove('sel'));
@@ -429,6 +497,7 @@ function saveAsImage(viewId, btnId, filename, forceDownload) {
             <div style="font-size:.65rem;color:#6b7e96">${acctLevel}</div>
           </div>
         </div>
+        ${(() => { const chips = buildAccountAllocHTML(acct.holdings || [], cashAdded); return chips ? `<div style="display:flex;flex-wrap:wrap;gap:6px;padding:10px 0 14px">${chips}</div>` : ''; })()}
         <table class="htable">
           <thead><tr><th>Ticker</th><th>Holding</th><th>Type</th><th style="text-align:center">Value</th><th style="text-align:center">Alloc</th><th style="text-align:center">Risk</th><th>Level</th></tr></thead>
           <tbody>${rowsHtml}</tbody>
@@ -452,7 +521,6 @@ function saveAsImage(viewId, btnId, filename, forceDownload) {
         </div>
       </div>
       <div style="font-size:.68rem;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:#6b7e96;margin-bottom:12px">Asset Allocation Breakdown</div>
-      ${(typeof buildAlignmentExportHTML === 'function') ? buildAlignmentExportHTML() : ''}
       <div class="alloc-grid" style="margin-bottom:24px">${allocGrid ? allocGrid.innerHTML : ''}</div>
       ${accountsHtml}
       <div class="footer-bar">
@@ -566,84 +634,6 @@ ${exportBody}
   To save as PDF: press <strong>Ctrl+P</strong> (or <strong>Cmd+P</strong> on Mac) and choose <strong>Save as PDF</strong>
 </p>
 
-<!-- ADD ACCOUNT MODAL -->
-<div class="aa-overlay" id="aa-overlay" style="display:none" onclick="if(event.target===this)closeAddAccountModal()">
-  <div class="aa-modal">
-    <div class="aa-modal-head">
-      <div class="aa-modal-title">Add Account to Portfolio</div>
-      <button class="aa-modal-close" onclick="closeAddAccountModal()">✕</button>
-    </div>
-    <div class="aa-modal-body">
-      <div class="aa-field-label">Account Name</div>
-      <input class="aa-input" id="aa-acct-name" placeholder="e.g. Joint Brokerage (1234)" style="margin-bottom:16px">
-
-      <div class="aa-field-label">Holdings <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--slate-lt)">(enter ticker + description + value, then score)</span></div>
-      <div style="display:grid;grid-template-columns:110px 1fr 110px 32px;gap:8px;margin-bottom:6px;">
-        <div style="font-size:.6rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--slate)">Ticker</div>
-        <div style="font-size:.6rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--slate)">Name / Description</div>
-        <div style="font-size:.6rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--slate)">Market Value ($)</div>
-        <div></div>
-      </div>
-      <div class="aa-holdings-list" id="aa-holdings-list"></div>
-      <button class="aa-add-row-btn" onclick="addHoldingRow()">＋ Add Holding</button>
-
-      <div style="margin-top:16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-        <button class="aa-score-btn" id="aa-score-btn" onclick="scoreNewHoldings()">🔍 Score Holdings with AI</button>
-        <span class="aa-scoring-note" id="aa-score-status"></span>
-      </div>
-
-      <div style="margin-top:16px;padding-top:16px;border-top:1px dashed var(--border);display:flex;align-items:center;gap:10px">
-        <span class="aa-field-label" style="margin:0;white-space:nowrap">💵 Cash / Debit Balance:</span>
-        <span style="font-size:.78rem;color:var(--slate);font-weight:600">$</span>
-        <input class="aa-input" id="aa-cash" type="number" step="1000" placeholder="0 (negative for debit balance)" style="max-width:160px">
-      </div>
-    </div>
-    <div class="aa-modal-footer">
-      <button class="aa-cancel-btn" onclick="closeAddAccountModal()">Cancel</button>
-      <button class="aa-confirm-btn" id="aa-confirm-btn" onclick="confirmAddAccount()">Add Account</button>
-    </div>
-  </div>
-</div>
-
-<!-- ══ STRESS TEST MODAL ══ -->
-<div class="st-modal-overlay" id="st-modal-overlay" onclick="closeStressModal(event)">
-  <div class="st-modal">
-    <div class="st-modal-head">
-      <div>
-        <div class="st-modal-title">⚡ Portfolio Stress Test</div>
-        <div class="st-modal-sub">Estimated impact based on historical asset class behavior · For advisor discussion only</div>
-      </div>
-      <div style="display:flex;align-items:center;gap:10px">
-        <button class="st-print-btn" id="st-print-btn" onclick="exportStressTest(this)">📄 Save as PDF / Print</button>
-        <button class="st-modal-close" onclick="closeStressTest()">✕</button>
-      </div>
-    </div>
-    <div class="st-modal-body">
-
-      <div class="st-tabs" id="st-tabs">
-        <div style="display:flex;align-items:center;gap:6px;width:100%;flex-wrap:wrap">
-          <span style="font-size:.58rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#c0392b;padding:3px 8px;background:#fde8e8;border-radius:20px;white-space:nowrap">📉 Bear Markets</span>
-          <div class="st-tab active" onclick="switchScenario('2008')">2008 Crisis</div>
-          <div class="st-tab" onclick="switchScenario('covid')">2020 COVID</div>
-          <div class="st-tab" onclick="switchScenario('2022')">2022 Rate Hike</div>
-          <div class="st-tab" onclick="switchScenario('dotcom')">2000 Dot Com Bubble</div>
-        </div>
-        <div style="display:flex;align-items:center;gap:6px;width:100%;flex-wrap:wrap;margin-top:4px">
-          <span style="font-size:.58rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#22a06b;padding:3px 8px;background:#e6f4ed;border-radius:20px;white-space:nowrap">📈 Bull Markets</span>
-          <div class="st-tab" onclick="switchScenario('bull2009')">2009 Rebound</div>
-          <div class="st-tab" onclick="switchScenario('bull2013')">2013 Post-Crisis</div>
-          <div class="st-tab" onclick="switchScenario('bull2017')">2017 Low-Vol</div>
-          <div class="st-tab" onclick="switchScenario('bull2021')">2021 Post-COVID</div>
-          <div class="st-tab" onclick="switchScenario('custom')">⚙️ Custom</div>
-        </div>
-      </div>
-
-      <div id="st-scenario-content"><!-- filled by JS --></div>
-
-    </div>
-  </div>
-</div>
-
 </body>
 </html>`;
 
@@ -713,7 +703,7 @@ function copyAnalyzerSummary() {
     summary += padCol('Ticker',8) + padCol('Name',34) + padCol('Type',26) + padCol('Alloc',8) + 'Score\n' + '─'.repeat(80) + '\n';
     rows.forEach(row => {
       const cells = row.querySelectorAll('td');
-      if (cells.length >= 5) summary += padCol(cells[0].textContent.trim(),8) + padCol(cells[1].textContent.trim().substring(0,32),34) + padCol(cells[2].textContent.trim().substring(0,24),26) + padCol(cells[3].textContent.trim(),8) + cells[4].textContent.trim() + '\n';
+      if (cells.length >= 6) summary += padCol(cells[0].textContent.trim(),8) + padCol(cells[1].textContent.trim().substring(0,32),34) + padCol(cells[2].textContent.trim().substring(0,24),26) + padCol(cells[4].textContent.trim(),8) + cells[5].textContent.trim().replace(/[^0-9]/g,'') + '\n';
     });
   }
   summary += '\n─────────────────────────────────────────────────\nDisclosure: Analysis is AI-generated for advisor discussion only. Not investment advice.\n';
@@ -752,4 +742,3 @@ function copyComplianceText() {
     navigator.clipboard.writeText(text).then(done).catch(() => fallbackCopy(text, done));
   } else { fallbackCopy(text, done); }
 }
-

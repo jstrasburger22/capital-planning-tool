@@ -1,8 +1,9 @@
 /* ═══════════════════════════════════════════════════════════
-   Capital Planning Wealth Management — Portfolio stress test — scenarios, income bridge, PDF export
+   Capital Planning Wealth Management — Portfolio stress test — scenarios, income bridge, risk alignment, PDF export
    Load order matters: files share one global scope and are loaded
    in numeric order by index.html.
    ═══════════════════════════════════════════════════════════ */
+
 // ══ STRESS TEST ══
 
 // Historical asset class drawdowns per scenario (approximate, based on index data)
@@ -98,7 +99,7 @@ const STRESS_SCENARIOS = {
     takeaway: 'This scenario exposed the limits of stock-bond diversification. Cash, CDs, annuities, and commodities were the rare bright spots. Structured notes with buffers also provided meaningful downside protection.'
   },
   'dotcom': {
-    label: '2000 Dot Com Bubble',
+    label: 'Dot-com Bust',
     period: 'Mar 2000 – Oct 2002',
     duration: '30 months peak-to-trough',
     recovery: '~7 years to new highs',
@@ -127,6 +128,38 @@ const STRESS_SCENARIOS = {
     },
     takeaway: 'A powerful reminder that diversification beyond equities matters enormously. Bonds and cash thrived as stocks collapsed. Portfolios balanced with fixed income would have navigated this period far more comfortably.'
   },
+  'stagflation': {
+    label: 'Stagflation Scenario',
+    period: '1970s analog / forward-looking',
+    duration: 'Multi-year environment',
+    recovery: 'Variable — depends on policy response',
+    description: 'A period of slow economic growth combined with persistent inflation. Erodes purchasing power, pressures both stocks and traditional bonds, while rewarding real assets and commodities.',
+    bull: false,
+    impacts: {
+      'US Large Cap Equity':       -30,
+      'US Mid Cap':                -32,
+      'US Small Cap':              -28,
+      'International Developed':   -25,
+      'Emerging Markets':          -20,
+      'Equity Income / Options':   -18,
+      'Balanced / Target Date':    -26,
+      'Investment Grade Bonds':    -22,
+      'US Treasuries':             -18,
+      'Municipal Bonds':           -20,
+      'High Yield Bonds':          -25,
+      'International Bonds':       -15,
+      'Cash & Money Market':       -3,
+      'CDs':                       +2,
+      'Real Estate':               +5,
+      'Commodities & Real Assets': +35,
+      'Crypto / Digital Assets':   -40,
+      'Structured Notes':          -10,
+      'Annuities':                 0,
+      'Other':                     -22,
+    },
+    takeaway: 'Stagflation is the scenario most portfolios are least prepared for. Real assets, commodities, and short-duration instruments tend to hold up best. Fixed income and growth equities face the most pressure.'
+  },
+
   // ── BULL MARKET SCENARIOS ──
   'bull2009': {
     label: '2009 Recovery Rally',
@@ -254,12 +287,23 @@ const STRESS_SCENARIOS = {
   }
 };
 
+// Long-duration Treasuries behave very differently from intermediate bonds
+// (e.g. −33% in 2022, but a cushion in 2008/2020). Approximate total returns
+// for a 20+ year Treasury index over each scenario window.
+const LONG_TREASURY_IMPACTS = {
+  '2008': +17, 'covid': +14, '2022': -33, 'dotcom': +32, 'stagflation': -28,
+  'bull2009': -22, 'bull2013': -13, 'bull2017': +9, 'bull2021': -5
+};
+Object.entries(LONG_TREASURY_IMPACTS).forEach(([k, v]) => {
+  if (STRESS_SCENARIOS[k]) STRESS_SCENARIOS[k].impacts['Long-Term Treasuries'] = v;
+});
+
 let _stActiveScenario = '2008';
 let _stCustomResult = null;
 
 // ── Income Bridge (stability cushion) ──
 const STABLE_CATEGORIES = [
-  'Cash & Money Market', 'CDs', 'US Treasuries', 'Investment Grade Bonds',
+  'Cash & Money Market', 'CDs', 'US Treasuries', 'Long-Term Treasuries', 'Investment Grade Bonds',
   'Municipal Bonds', 'International Bonds', 'Annuities'
 ];
 let _stDistAmount = '';      // persists across scenario tabs
@@ -631,6 +675,168 @@ function updateStressBridge() {
     legend;
 }
 
+
+let _stRAData = null;
+// ── Risk Alignment (portfolio risk score vs. manually-entered client tolerance) ──
+let _stToleranceScore = '';
+
+// Risk color scale (mirrors the analyzer's riskColor thresholds) so numbers match.
+function _raRiskColor(s) {
+  s = parseInt(s);
+  if (isNaN(s)) return '#6b7e96';
+  if (s <= 25) return '#2563a8';
+  if (s <= 40) return '#22a06b';
+  if (s <= 60) return '#6b7e96';
+  if (s <= 75) return '#d4820a';
+  return '#c0392b';
+}
+
+// Prefer the analyzer's displayed overall score (accounts for manual overrides & cash);
+// fall back to a market-value-weighted average of the active holdings' risk scores.
+function getPortfolioRiskScore() {
+  const el = (typeof document !== 'undefined') ? document.getElementById('az-score') : null;
+  if (el) {
+    const v = parseInt((el.textContent || '').replace(/[^0-9]/g, ''));
+    if (!isNaN(v) && v > 0) return v;
+  }
+  const hs = (typeof getActiveDDHoldings === 'function') ? getActiveDDHoldings() : [];
+  let num = 0, den = 0;
+  hs.forEach(h => {
+    const mv = Math.abs(parseFloat(h.market_value) || 0);
+    const rs = parseFloat(h.risk_score);
+    if (mv > 0 && !isNaN(rs)) { num += rs * mv; den += mv; }
+  });
+  return den > 0 ? Math.round(num / den) : null;
+}
+
+function injectRAStyles() {
+  if (typeof document === 'undefined' || document.getElementById('st-ra-styles')) return;
+  const s = document.createElement('style');
+  s.id = 'st-ra-styles';
+  s.textContent = `
+    .st-ra{margin-top:24px;background:#fff;border:1px solid #e4e9f0;border-radius:16px;padding:22px 24px;box-shadow:0 2px 14px rgba(20,40,70,.05)}
+    .st-ra-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:16px}
+    .st-ra-title{font-family:'Playfair Display',serif;font-size:1.15rem;font-weight:700;color:var(--navy,#1b2b3a);display:flex;align-items:center;gap:9px}
+    .st-ra-badge{font-size:.72rem;font-weight:800;letter-spacing:.04em;text-transform:uppercase;padding:7px 15px;border-radius:30px}
+    .st-ra-cards{display:grid;grid-template-columns:1fr 1fr 1.7fr;gap:14px}
+    @media(max-width:720px){.st-ra-cards{grid-template-columns:1fr 1fr}.st-ra-narr{grid-column:1/-1}}
+    .st-ra-card{background:#f8fafc;border:1px solid #eef2f7;border-radius:12px;padding:16px 18px;text-align:center;display:flex;flex-direction:column;align-items:center;justify-content:center}
+    .st-ra-lbl{font-size:.62rem;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:#8494a8;margin-bottom:6px}
+    .st-ra-num{font-family:'Playfair Display',serif;font-size:2.6rem;font-weight:700;line-height:1}
+    .st-ra-sub{font-size:.66rem;color:#8494a8;margin-top:7px}
+    .st-ra-input{font-family:'Playfair Display',serif;font-size:2.6rem;font-weight:700;line-height:1;width:100%;max-width:120px;text-align:center;border:none;border-bottom:2px dashed #cfd8e3;background:transparent;padding:0 0 2px;color:#1b2b3a}
+    .st-ra-input:focus{outline:none;border-bottom-color:var(--gold,#cda561)}
+    .st-ra-input::-webkit-outer-spin-button,.st-ra-input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+    .st-ra-narr{text-align:left;align-items:flex-start;justify-content:center;font-size:.82rem;line-height:1.6;color:#3d4b5e;background:#fbfcfe}
+    .st-ra-scale{margin-top:26px;padding:0 4px}
+    .st-ra-barwrap{position:relative;height:12px;margin:34px 0 30px}
+    .st-ra-bar{position:absolute;inset:0;border-radius:7px;background:linear-gradient(90deg,#2b6cb0 0%,#2f9e6b 33%,#e0b020 60%,#d4820a 78%,#c0392b 100%)}
+    .st-ra-pin{position:absolute;top:-5px;width:3px;height:22px;background:#1b2b3a;border-radius:2px;transform:translateX(-50%)}
+    .st-ra-mark{position:absolute;font-size:.68rem;font-weight:800;white-space:nowrap;transform:translateX(-50%)}
+    .st-ra-mark.port{top:-30px;color:#1b2b3a}
+    .st-ra-mark.port:after{content:'';position:absolute;left:50%;top:16px;width:2px;height:12px;background:currentColor;transform:translateX(-50%)}
+    .st-ra-mark.tol{top:26px;color:#5a6a80}
+    .st-ra-empty{font-size:.8rem;color:#8494a8;text-align:center;padding:8px 0 2px}
+  `;
+  document.head.appendChild(s);
+}
+
+function buildRiskAlignmentSection() {
+  injectRAStyles();
+  const port = getPortfolioRiskScore();
+  _stRAData = { port };
+  if (port == null) { _stRAData = null; return ''; }
+  let fromQuiz = false;
+  if (_stToleranceScore === '' && window._lastQuizResult) { _stToleranceScore = String(window._lastQuizResult.score); fromQuiz = true; }
+  const q = window._lastQuizResult;
+  const tolSub = (q && String(q.score) === String(_stToleranceScore))
+    ? `from questionnaire${q.who ? ' · ' + q.who : ''} · ${q.date}`
+    : 'manually entered target';
+  const tolVal = _stToleranceScore !== '' ? ` value="${_stToleranceScore}"` : '';
+  return `
+    <div class="st-ra">
+      <div class="st-ra-head">
+        <div class="st-ra-title">🎯 Risk Alignment</div>
+        <div class="st-ra-badge" id="st-ra-badge" style="display:none"></div>
+      </div>
+      <div class="st-ra-cards">
+        <div class="st-ra-card">
+          <div class="st-ra-lbl">Portfolio Risk Score</div>
+          <div class="st-ra-num" style="color:${_raRiskColor(port)}">${port}</div>
+          <div class="st-ra-sub">what they own today</div>
+        </div>
+        <div class="st-ra-card">
+          <div class="st-ra-lbl">Client Risk Tolerance</div>
+          <input id="st-ra-tol" class="st-ra-input" type="number" min="1" max="99" step="1" placeholder="—"${tolVal} oninput="updateRiskAlignment()">
+          <div class="st-ra-sub">${tolSub}</div>
+        </div>
+        <div class="st-ra-card st-ra-narr" id="st-ra-narr">Enter the client's risk tolerance score (from the questionnaire) to compare it against what their portfolio is actually taking on.</div>
+      </div>
+      <div class="st-ra-scale" id="st-ra-scale"></div>
+    </div>`;
+}
+
+function updateRiskAlignment() {
+  if (typeof document === 'undefined' || !_stRAData) return;
+  injectRAStyles();
+  const tolEl = document.getElementById('st-ra-tol');
+  if (tolEl) {
+    _stToleranceScore = tolEl.value;
+    if (typeof cpNoteManualTolerance === 'function') cpNoteManualTolerance(tolEl.value);
+  }
+  const port = _stRAData.port;
+  const tol = parseInt(_stToleranceScore);
+  const badge = document.getElementById('st-ra-badge');
+  const narr = document.getElementById('st-ra-narr');
+  const scale = document.getElementById('st-ra-scale');
+
+  if (isNaN(tol) || tol < 1) {
+    if (badge) badge.style.display = 'none';
+    if (narr) narr.innerHTML = "Enter the client's risk tolerance score (from the questionnaire) to compare it against what their portfolio is actually taking on.";
+    if (scale) scale.innerHTML = '';
+    return;
+  }
+
+  const delta = port - tol;              // + = portfolio riskier than tolerance
+  const mag = Math.abs(delta);
+  let col, pale, badgeTxt, msg;
+
+  if (mag <= 5) {
+    col = '#1d7a50'; pale = '#e9f6ef';
+    badgeTxt = 'In Line With Tolerance';
+    msg = `The portfolio's risk is <strong>well aligned</strong> with the client's stated tolerance of ${tol}. What they own matches how much risk they've told you they're comfortable taking — a good place to confirm the plan and move on.`;
+  } else if (delta > 5) {
+    if (delta > 15) { col = '#c0392b'; pale = '#fdeaea'; }
+    else            { col = '#c2410c'; pale = '#fdecdf'; }
+    badgeTxt = `${delta} pts Above Tolerance`;
+    msg = `The portfolio is taking <strong>${delta} points more risk</strong> than the client's stated tolerance of ${tol}. In a sharp downturn it may fall further than they're emotionally prepared for — a strong, objective starting point for a rebalancing conversation.`;
+  } else {
+    col = '#2563a8'; pale = '#e8f0fa';
+    badgeTxt = `${mag} pts Below Tolerance`;
+    msg = `The portfolio is carrying <strong>${mag} points less risk</strong> than the client's stated tolerance of ${tol}. That's a comfortable, conservative place to be — though it's worth confirming they aren't leaving long-term growth on the table relative to what they're willing to accept.`;
+  }
+
+  if (badge) {
+    badge.style.display = '';
+    badge.textContent = badgeTxt;
+    badge.style.color = col;
+    badge.style.background = pale;
+  }
+  if (narr) narr.innerHTML = msg;
+
+  if (scale) {
+    const pPort = Math.max(0, Math.min(100, port));
+    const pTol = Math.max(0, Math.min(100, tol));
+    scale.innerHTML =
+      `<div class="st-ra-barwrap">
+        <div class="st-ra-bar"></div>
+        <div class="st-ra-mark port" style="left:${pPort}%;color:${_raRiskColor(port)}">Portfolio ${port}</div>
+        <div class="st-ra-pin" style="left:${pTol}%"></div>
+        <div class="st-ra-mark tol" style="left:${pTol}%">Tolerance ${tol}</div>
+      </div>`;
+  }
+}
+
 function exportStressTest(btn) {
   const contentEl = document.getElementById('st-scenario-content');
   if (!contentEl || !contentEl.innerHTML.trim()) return;
@@ -641,7 +847,7 @@ function exportStressTest(btn) {
 
   // Clone the rendered scenario and strip interactive elements for print
   const clone = contentEl.cloneNode(true);
-  clone.querySelectorAll('.st-bridge-input-row, .st-bridge-msg.info, .st-custom-grid, .st-run-btn').forEach(el => el.remove());
+  clone.querySelectorAll('.st-bridge-input-row, .st-bridge-msg.info, .st-custom-grid, .st-run-btn, .st-modal-close, .st-print-btn').forEach(el => el.remove());
   if (_stActiveScenario === 'custom') {
     const first = clone.firstElementChild;
     if (first && !first.id && !first.className) first.remove(); // instruction text
@@ -753,7 +959,6 @@ ${fontTag}
   }
   setTimeout(() => { if (btn) btn.innerHTML = '📄 Save as PDF / Print'; }, 4000);
 }
-
 function openStressTest() {
   const overlay = document.getElementById('st-modal-overlay');
   if (!overlay) return;
@@ -774,7 +979,7 @@ function switchScenario(key) {
   // Update tabs
   document.querySelectorAll('.st-tab').forEach(t => t.classList.remove('active'));
   const tabs = document.querySelectorAll('.st-tab');
-  const keys = ['2008','covid','2022','dotcom','bull2009','bull2013','bull2017','bull2021','custom'];
+  const keys = ['2008','covid','2022','dotcom','stagflation','bull2009','bull2013','bull2017','bull2021','custom'];
   const idx = keys.indexOf(key);
   if (tabs[idx]) tabs[idx].classList.add('active');
 
@@ -851,12 +1056,20 @@ function renderScenario(key) {
     const barColor = a.impact >= 0 ? '#16a34a' : (a.impact > -20 ? '#e67e22' : '#c0392b');
     const sign = a.impact >= 0 ? '+' : '';
     const displayPct = Math.abs(a.impact) > 999 ? sign + a.impact.toLocaleString() + '%' : sign + a.impact + '%';
+    const dollarContribution = a.mv * (a.impact / 100);
+    const dollarStr = (dollarContribution >= 0 ? '+' : '−') + fmt$(dollarContribution);
     return `<div class="st-asset-row">
-      <div class="st-asset-label">${a.cat}</div>
+      <div>
+        <div class="st-asset-label">${a.cat}</div>
+        <div class="st-asset-weight">${a.pct.toFixed(0)}% of portfolio</div>
+      </div>
       <div class="st-asset-bar-bg">
         <div class="st-asset-bar-fill" style="width:0%;background:${barColor}" data-w="${barWidth}"></div>
       </div>
-      <div class="st-asset-pct ${a.impact >= 0 ? 'pos' : 'neg'}">${displayPct}</div>
+      <div class="st-asset-figs">
+        <div class="st-asset-pct ${a.impact >= 0 ? 'pos' : 'neg'}">${displayPct}</div>
+        <div class="st-asset-dollar">${dollarStr}</div>
+      </div>
     </div>`;
   }).join('');
 
@@ -899,7 +1112,10 @@ function renderScenario(key) {
       </div>
     </div>
 
-    <div style="font-size:.62rem;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--slate);margin-bottom:12px">Asset Class Impact</div>
+    <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:12px;flex-wrap:wrap;gap:4px">
+      <div style="font-size:.62rem;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--slate)">What Drove the Result</div>
+      <div style="font-size:.6rem;color:var(--slate-lt)">weighting · scenario move · dollar impact</div>
+    </div>
     <div class="st-asset-grid">${barsHTML}</div>
 
     <div class="st-takeaway" style="border-left:3px solid ${accentColor}"><strong>Key Takeaway:</strong> ${scenario.takeaway}</div>
@@ -969,12 +1185,20 @@ function runCustomScenario() {
     const barWidth = (Math.abs(a.impact) / maxAbs * 100).toFixed(1);
     const barColor = a.impact >= 0 ? '#16a34a' : (a.impact > -20 ? '#e67e22' : '#c0392b');
     const sign = a.impact >= 0 ? '+' : '';
+    const dollarContribution = a.mv * (a.impact / 100);
+    const dollarStr = (dollarContribution >= 0 ? '+' : '−') + fmt$(dollarContribution);
     return `<div class="st-asset-row">
-      <div class="st-asset-label">${a.cat}</div>
+      <div>
+        <div class="st-asset-label">${a.cat}</div>
+        <div class="st-asset-weight">${a.pct.toFixed(0)}% of portfolio</div>
+      </div>
       <div class="st-asset-bar-bg">
         <div class="st-asset-bar-fill" style="width:0%;background:${barColor}" data-w="${barWidth}"></div>
       </div>
-      <div class="st-asset-pct ${a.impact >= 0 ? 'pos' : 'neg'}">${sign}${a.impact.toFixed(0)}%</div>
+      <div class="st-asset-figs">
+        <div class="st-asset-pct ${a.impact >= 0 ? 'pos' : 'neg'}">${sign}${a.impact.toFixed(0)}%</div>
+        <div class="st-asset-dollar">${dollarStr}</div>
+      </div>
     </div>`;
   }).join('');
 
@@ -998,7 +1222,10 @@ function runCustomScenario() {
         <div class="st-stat-sub">asset categories</div>
       </div>
     </div>
-    <div style="font-size:.62rem;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--slate);margin-bottom:12px">Asset Class Impact</div>
+    <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:12px;flex-wrap:wrap;gap:4px">
+      <div style="font-size:.62rem;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--slate)">What Drove the Result</div>
+      <div style="font-size:.6rem;color:var(--slate-lt)">weighting · scenario move · dollar impact</div>
+    </div>
     <div class="st-asset-grid">${barsHTML}</div>
     ${customBridgeHTML}
     <div style="font-size:.6rem;color:var(--slate);margin-top:12px;line-height:1.5">* Custom scenario using your defined inputs. For illustrative and advisory discussion purposes only.</div>
@@ -1046,4 +1273,3 @@ function resetAnalyzer() {
   document.getElementById('az-results').style.display = 'none';
   document.getElementById('az-results').innerHTML = '';
 }
-

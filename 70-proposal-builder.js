@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════
-   Capital Planning Wealth Management — Portfolio proposal builder — sleeves, comparisons, exports
+   Capital Planning Wealth Management — Firm model data + portfolio proposal builder
    Load order matters: files share one global scope and are loaded
    in numeric order by index.html.
    ═══════════════════════════════════════════════════════════ */
@@ -1112,6 +1112,26 @@ async function pbHandleUpload(file) {
 
 // ── AI parse of current portfolio (uses the same engine as the analyzer) ──
 async function pbParseCurrent(file, fileData, ext) {
+  // CSV / Excel: use the exact same local parser + scoring as the Portfolio Analyzer,
+  // so the same file always produces the same score in both tools.
+  if (ext === 'csv' || ext === 'xlsx' || ext === 'xls') {
+    let csvText = fileData;
+    if (ext !== 'csv') {
+      const wb = XLSX.read(fileData, { type:'array' });
+      csvText = XLSX.utils.sheet_to_csv(wb.Sheets[wb.SheetNames[0]]);
+    }
+    if (!csvText || !csvText.trim()) throw new Error('File appears empty.');
+    const parsedLocal = parseCSVLocally(csvText);
+    if (!parsedLocal || !parsedLocal.accounts.flatMap(a => a.holdings).length) throw new Error('No holdings found in file.');
+    const need = parsedLocal.accounts.flatMap(a => a.holdings).filter(h => h._needsScore);
+    if (need.length) {
+      document.getElementById('pb-upload-status').textContent = `Scoring ${need.length} unknown holding${need.length === 1 ? '' : 's'}…`;
+      await scoreUnknownTickersBatch(need);
+    }
+    _pbFinalizeCurrent(parsedLocal.portfolio_name, parsedLocal.accounts);
+    return;
+  }
+
   let fileContent = [];
   if (file.type.startsWith('image/') || (!['pdf','csv','xlsx','xls','docx','doc'].includes(ext))) {
     const b64 = fileData.split(',')[1];
@@ -1155,7 +1175,8 @@ ${knownScoresJSON}
 
 For any ticker NOT in the list above, use your knowledge to assign a score. Calibration:
 SPY=74, QQQ=85, AGG=28, TLT=35, HYG=48, GLD=65, EEM=82, IBIT=95
-Money market/cash=5, Variable annuity=50, Other annuities=5, Structured note=30, Bond=20, CD=5
+Money market/cash=5, Variable annuity=50, Other annuities=5, Structured note=30, CD=5
+Bond FUNDS by duration: T-bill 5, short 13-15, intermediate 26-28, long Treasury 35-42 (never 5 unless a T-bill/money market fund). Individual bonds 10-24 by maturity. Individual stocks never below 78.
 
 CRITICAL — Return ONLY valid JSON, no markdown, no explanation:
 {"portfolio_name":"string","accounts":[{"account_name":"string","holdings":[{"ticker":"string","name":"string","type":"string","market_value":number,"allocation_pct":number,"risk_score":number}]}]}
@@ -1170,7 +1191,7 @@ Rules:
     method: 'POST',
     headers: getApiHeaders(),
     body: JSON.stringify({
-      model: 'claude-sonnet-4-6',
+      model: AI_MODEL,
       max_tokens: 8000,
       messages: [{ role:'user', content: [...fileContent, { type:'text', text:prompt }] }]
     })
@@ -1184,16 +1205,18 @@ Rules:
   if (!m) throw new Error('Could not parse AI response.');
   const parsed = JSON.parse(m[0]);
 
-  // Apply classifyHolding overrides (annuity/note/bond detection) the same way the analyzer does
-  const accounts = (parsed.accounts || []).map(acct => ({
+  _pbFinalizeCurrent(parsed.portfolio_name, parsed.accounts || []);
+}
+
+// Score every holding with the shared engine and store the current portfolio
+function _pbFinalizeCurrent(portfolioName, rawAccounts) {
+  const accounts = (rawAccounts || []).map(acct => ({
     ...acct,
     holdings: (acct.holdings || []).map(h => {
-      const classified = classifyHolding(h);
-      const mv = parseFloat(h.market_value) || 0;
-      if (classified) return { ...h, market_value: mv, risk_score: classified.score, type: classified.type };
-      const t = (h.ticker || '').toUpperCase().trim();
-      const local = TICKER_SCORES[t] || _sessionScoreCache[t];
-      return { ...h, market_value: mv, risk_score: local !== undefined ? local : (h.risk_score || 50) };
+      const x = { ...h, market_value: parseFloat(h.market_value) || 0 };
+      applyResolvedScore(x);
+      applyHoldingOverride(x);
+      return x;
     })
   }));
 
@@ -1209,7 +1232,7 @@ Rules:
   const overallRisk = totalValue > 0 ? Math.round(weightedScore / totalValue) : 50;
 
   _pbState.current = {
-    portfolio_name: parsed.portfolio_name || 'Client Portfolio',
+    portfolio_name: portfolioName || 'Client Portfolio',
     total_value: totalValue,
     risk_score: overallRisk,
     accounts: accounts,
@@ -1223,15 +1246,13 @@ function pbComputeAssetAlloc(accounts) {
   accounts.forEach(a => {
     (a.holdings || []).forEach(h => {
       const mv = parseFloat(h.market_value) || 0;
-      const t = (h.type || '').toLowerCase();
-      const s = parseFloat(h.risk_score) || 50;
-      if (t.includes('annuity')) ann += mv;
-      else if (t.includes('structured note') || t.includes('buffer note') || t.includes('autocall') ||
-               t.includes('barrier note') || t.includes('reverse convertible') ||
-               t.includes('participation note') || t.includes('principal protected')) sn += mv;
-      else if (s <= 6 || t.includes('money market') || (t.includes('cash') && !t.includes('cash flow'))) cash += mv;
-      else if (s <= 40 || t.includes('bond') || t.includes('fixed') || t.includes('municipal') || t.includes('securitized')) fi += mv;
-      else if (t.includes('alt') || t.includes('commodity') || t.includes('real asset')) alt += mv;
+      if (mv <= 0) return;
+      const b = assetBucket(h);
+      if (b === 'Annuities') ann += mv;
+      else if (b === 'Structured Notes') sn += mv;
+      else if (b === 'Cash') cash += mv;
+      else if (b === 'Fixed Income') fi += mv;
+      else if (b === 'Alternatives') alt += mv;
       else eq += mv;
     });
   });
@@ -1408,7 +1429,7 @@ function pbUpdateModelPreview(resetSleeve) {
   const sleeve = (model.sleeves || [])[sleeveIdx];
   if (!sleeve) return;
 
-  const risk = pbComputeSleeveRisk(sleeve.holdings);
+  const risk = pbComputeSleeveRisk(sleeve.holdings.map(h => applyResolvedScore({ ...h })));
   const col = riskColor(risk);
   const holdingsHtml = sleeve.holdings.map(h =>
     `<div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid var(--border)">
@@ -1452,12 +1473,8 @@ function pbConfirmModelSleeve() {
   const sleeve = (model.sleeves || [])[sleeveIdx];
   if (!sleeve) { alert('Selected model has no holdings.'); return; }
 
-  // Apply classifyHolding overrides to the model's holdings (in case some need reclassification)
-  const holdings = sleeve.holdings.map(h => {
-    const classified = classifyHolding(h);
-    if (classified) return { ...h, risk_score: classified.score, type: classified.type };
-    return { ...h };
-  });
+  // Score the model's holdings with the shared engine (verified table first)
+  const holdings = sleeve.holdings.map(h => applyResolvedScore({ ...h }));
   const risk = pbComputeSleeveRisk(holdings);
 
   _pbState.sleeves.push(pbBuildSleeve({
@@ -1523,19 +1540,17 @@ function pbConfirmCustomSleeve() {
     if (!ticker && !hname) return; // skip blank rows
     if (isNaN(w) || w <= 0) return; // require a weight
 
-    // Auto-classify if no risk provided
-    const fake = { ticker, name: hname, type: '' };
-    const classified = classifyHolding(fake);
-    if (isNaN(r)) {
-      if (classified) r = classified.score;
-      else r = TICKER_SCORES[ticker] || _sessionScoreCache[ticker] || 50;
-    }
+    // Auto-score with the shared engine if no risk was typed in
+    const rs = resolveHoldingScore({ ticker, name: hname, type: '' });
+    const typed = !isNaN(r);
+    if (!typed) r = rs.score;
     holdings.push({
       ticker,
       name: hname || ticker,
-      type: classified ? classified.type : 'Custom',
+      type: rs.src === 'rule' ? rs.type : 'Custom',
       weight: w,
-      risk_score: r
+      risk_score: r,
+      _src: typed ? 'manual' : rs.src
     });
   });
 
@@ -1582,16 +1597,9 @@ function pbComputeProposed() {
     sl.holdings.forEach(h => {
       const w = (parseFloat(h.weight) || 0) / innerSum;
       const overallShare = sleeveShare * w * 100;
-      const t = (h.type || '').toLowerCase();
-      const s = parseFloat(h.risk_score) || 50;
-      if (t.includes('annuity')) buckets['Annuities'] += overallShare;
-      else if (t.includes('structured note') || t.includes('buffer note') || t.includes('autocall') ||
-               t.includes('barrier') || t.includes('reverse convertible') ||
-               t.includes('participation note') || t.includes('principal protected')) buckets['Structured Notes'] += overallShare;
-      else if (s <= 6 || t.includes('money market') || (t.includes('cash') && !t.includes('cash flow'))) buckets['Cash'] += overallShare;
-      else if (s <= 40 || t.includes('bond') || t.includes('fixed') || t.includes('municipal') || t.includes('securitized')) buckets['Fixed Income'] += overallShare;
-      else if (t.includes('alt') || t.includes('commodity') || t.includes('real asset')) buckets['Alternatives'] += overallShare;
-      else buckets['Equities'] += overallShare;
+      const b = assetBucket(h);
+      const key = (b === 'Debit') ? 'Equities' : b;
+      buckets[key] = (buckets[key] || 0) + overallShare;
     });
   });
 
@@ -1766,8 +1774,58 @@ function pbRestoreAfterExport() {
   // attribute-sync above does not break the live UI (DOM .value still drives display).
 }
 
+// ── Bring the Analyzer's portfolio straight into the proposal ──
+function pbRefreshAnalyzerButton() {
+  const btn = document.getElementById('pb-from-analyzer-btn');
+  if (!btn) return;
+  const has = Array.isArray(_portfolioAccounts) && _portfolioAccounts.length > 0;
+  btn.style.display = has ? '' : 'none';
+  if (has) {
+    const t = document.getElementById('az-portfolio-title');
+    const nm = t ? t.textContent.replace('✎', '').trim() : '';
+    const sc = document.getElementById('az-score');
+    const el = document.getElementById('pb-from-analyzer-title');
+    if (el) el.textContent = 'Use ' + (nm || 'the Analyzer portfolio') + (sc && sc.textContent ? ' (risk ' + sc.textContent.trim() + ')' : '');
+  }
+}
+function pbUseAnalyzerPortfolio() {
+  if (!_portfolioAccounts || !_portfolioAccounts.length) { alert('Run the Portfolio Analyzer first.'); return; }
+  const accounts = _portfolioAccounts.map(a => {
+    const hs = (a.holdings || []).map(h => ({ ...h }));
+    if ((a.cash_added || 0) > 0) hs.push({ ticker:'CASH', name:'Cash', type:'Cash / Money Market', market_value:a.cash_added, risk_score:5, _src:'rule' });
+    return { account_name: a.account_name, holdings: hs, cash_added: a.cash_added || 0 };
+  });
+  const totalValue = _portfolioAccounts.reduce((s, a) =>
+    s + (a.holdings || []).reduce((x, h) => x + (parseFloat(h.market_value) || 0), 0) + (a.cash_added || 0), 0);
+  const scoreEl = document.getElementById('az-score');
+  const titleEl = document.getElementById('az-portfolio-title');
+  _pbState.noCurrent = false;
+  _pbState.current = {
+    portfolio_name: titleEl ? titleEl.textContent.replace('✎', '').trim() : 'Client Portfolio',
+    total_value: totalValue,
+    risk_score: parseInt(scoreEl && scoreEl.textContent, 10) || 50,   // identical to the Analyzer banner
+    accounts,
+    asset_alloc: pbComputeAssetAlloc(accounts)
+  };
+  document.getElementById('pb-skip-btn').classList.remove('active');
+  document.getElementById('pb-upload-status').classList.remove('err');
+  document.getElementById('pb-upload-status').textContent = '✓ Loaded from the Portfolio Analyzer';
+  document.getElementById('pb-step1-num').classList.add('done');
+  pbRenderCurrentSummary();
+  document.getElementById('pb-step2').style.display = 'block';
+  document.getElementById('pb-step3').style.display = 'block';
+  pbRenderSleeves();
+  pbRenderComparison();
+}
+(function () {
+  const _prevShowView = window.showView;
+  window.showView = function (name) {
+    _prevShowView(name);
+    if (name === 'proposal') pbRefreshAnalyzerButton();
+  };
+})();
+
 // Keep notes in sync as the user types (for export)
 document.addEventListener('input', e => {
   if (e.target && e.target.id === 'pb-notes') _pbState.notes = e.target.value;
 });
-

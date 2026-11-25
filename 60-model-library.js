@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════
-   Capital Planning Wealth Management — House model manager — 15 firm models, trade log, performance
+   Capital Planning Wealth Management — House model manager — firm models, trade log, performance
    Load order matters: files share one global scope and are loaded
    in numeric order by index.html.
    ═══════════════════════════════════════════════════════════ */
@@ -551,7 +551,7 @@ Return ONLY a JSON array (no markdown), one object per holding in order:
     const resp = await fetch('/api/proxy', {
       method:'POST', headers: getApiHeaders(),
       body: JSON.stringify({
-        model:'claude-sonnet-4-6', max_tokens:2000,
+        model: AI_MODEL, max_tokens:2000,
         messages:[{role:'user',content:prompt}]
       })
     });
@@ -606,7 +606,7 @@ async function mdlProcessFile(file) {
       const b64 = await new Promise(res => { reader.onload = e => res(e.target.result.split(',')[1]); reader.readAsDataURL(file); });
       const resp = await fetch('/api/proxy', {
         method:'POST', headers: getApiHeaders(),
-        body: JSON.stringify({ model:'claude-sonnet-4-6', max_tokens:3000,
+        body: JSON.stringify({ model: AI_MODEL, max_tokens:3000,
           messages:[{role:'user',content:[
             {type:'document',source:{type:'base64',media_type:'application/pdf',data:b64}},
             {type:'text',text:'Extract all holdings. Return JSON array: [{"ticker":"","name":"","weight":0},...]. Only JSON, no markdown.'}
@@ -944,7 +944,7 @@ Calculate the weighted average YTD and 1-year return for this specific sleeve, t
 
     // Two-turn conversation: let AI calculate freely, then extract JSON
     const firstResp = await fetchWithRetry({
-      model: 'claude-sonnet-4-6',
+      model: AI_MODEL,
       max_tokens: 1000,
       messages: [{ role: 'user', content: prompt }]
     });
@@ -963,7 +963,7 @@ Calculate the weighted average YTD and 1-year return for this specific sleeve, t
     // If no JSON found, send a follow-up asking just for the JSON
     if (!perf || perf.ytd == null) {
       const secondResp = await fetchWithRetry({
-        model: 'claude-sonnet-4-6',
+        model: AI_MODEL,
         max_tokens: 200,
         messages: [
           { role: 'user', content: prompt },
@@ -1044,7 +1044,7 @@ Return ONLY JSON (no markdown):
     const resp = await fetch('/api/proxy', {
       method:'POST', headers: getApiHeaders(),
       body: JSON.stringify({
-        model:'claude-sonnet-4-6', max_tokens:600,
+        model: AI_MODEL, max_tokens:600,
         messages:[{role:'user',content:prompt}]
       })
     });
@@ -1116,7 +1116,7 @@ Only include holdings where you can genuinely suggest a better alternative. Skip
     const resp = await fetch('/api/proxy', {
       method:'POST', headers: getApiHeaders(),
       body: JSON.stringify({
-        model:'claude-sonnet-4-6', max_tokens:3000,
+        model: AI_MODEL, max_tokens:3000,
         messages:[{role:'user',content:prompt}]
       })
     });
@@ -1208,7 +1208,7 @@ Keep it concise and advisor-focused. Use specific numbers. Write in plain prose,
     const resp = await fetch('/api/proxy', {
       method:'POST', headers: getApiHeaders(),
       body: JSON.stringify({
-        model:'claude-sonnet-4-6', max_tokens:600,
+        model: AI_MODEL, max_tokens:600,
         messages:[{role:'user',content:prompt}]
       })
     });
