@@ -836,6 +836,9 @@ body{font-family:'Nunito Sans',sans-serif;background:var(--cream);color:var(--te
 </div>
 
 <script>
+  // AI model used for every call through /api/proxy. Change it here once.
+  const AI_MODEL = 'claude-sonnet-4-6';
+
   function getApiHeaders() {
     return {
       'Content-Type': 'application/json',
@@ -1304,6 +1307,7 @@ function showView(name) {
     quiz: 'Risk Questionnaire · Bucket Three',
     'quiz-results': 'Risk Assessment Results',
     analyzer: 'Portfolio Analyzer · Advisor Tool',
+    proposal: 'Portfolio Proposal Builder · Advisor Tool',
     models: 'Investment Model Library · Advisor Tool'
   };
   document.getElementById('hdr-sub').textContent = subs[name] || '';
@@ -1329,6 +1333,17 @@ const QUIZ_QA_MAP = {
 };
 const QW    = { q1:12, q2:10, q3:20, q4:16, q5:12, q6:8, q7:22 };
 const Q_MAX = { q1:4,  q2:4,  q3:5,  q4:5,  q5:5,  q6:5, q7:5  };
+// Lowest point value available on each question (Q2 and Q5 have no 1-point answer)
+const Q_MIN = { q1:1,  q2:2,  q3:1,  q4:1,  q5:2,  q6:1, q7:1  };
+
+// SCORING SCALE — Nov 2026
+// The original formula divided by the maximum only, so the most cautious possible
+// answers still scored 26 ("Moderately Conservative") and the Conservative band was
+// unreachable; 65% of all answer combinations landed Mod. Aggressive or higher.
+// The full-range scale maps the most cautious answers to 1 and the boldest to 100.
+// Set QUIZ_FULL_RANGE = false to restore the original scale.
+const QUIZ_FULL_RANGE = true;
+const QUIZ_SCORING_VERSION = QUIZ_FULL_RANGE ? 'v2 — full-range scale (Nov 2026)' : 'v1 — original scale';
 
 let coupleMode = false;
 let p1Name = 'Spouse 1', p2Name = 'Spouse 2';
@@ -1417,14 +1432,42 @@ function updateProgress() {
 }
 
 function calcQScore(answers) {
-  let total = 0, maxTotal = 0;
+  let total = 0, maxTotal = 0, minTotal = 0;
   for (const [qKey, weight] of Object.entries(QW)) {
     const ans = answers[qKey];
     if (ans === undefined) return null;
     total    += ans * weight;
     maxTotal += Q_MAX[qKey] * weight;
+    minTotal += Q_MIN[qKey] * weight;
   }
-  return Math.round((total / maxTotal) * 100);
+  if (!QUIZ_FULL_RANGE) return Math.round((total / maxTotal) * 100);
+  return Math.max(1, Math.round((total - minTotal) / (maxTotal - minTotal) * 100));
+}
+
+// ── Answer-consistency checks: contradictions worth discussing before relying on the score ──
+function getQuizFlags(ans, who) {
+  const f = [], p = who ? who + ': ' : '';
+  if (ans.q3 === 1 && (ans.q7 >= 4 || ans.q4 === 5))
+    f.push(p + 'Would sell after a 25% drop (Q3), but also chose ' + (ans.q4 === 5 ? 'the high-swing portfolio (Q4)' : 'a loss tolerance of 15%+ (Q7)') + '. Confirm which reflects how they would really act.');
+  if (ans.q6 === 1 && ans.q7 >= 4)
+    f.push(p + 'Would move to safer investments on a crash prediction (Q6), yet reports tolerating 15%+ annual losses (Q7).');
+  if (ans.q5 >= 4 && (ans.q7 === 1 || ans.q4 === 1))
+    f.push(p + 'Expects 10%+ annual returns (Q5) while wanting ' + (ans.q7 === 1 ? 'minimal losses (Q7)' : 'the low-swing portfolio (Q4)') + '. Return expectations may not match their comfort with risk.');
+  if ((ans.q1 === 1 && ans.q4 === 5) || (ans.q1 === 4 && ans.q4 === 1))
+    f.push(p + 'Stated priority (Q1) and chosen portfolio (Q4) point in opposite directions.');
+  return f;
+}
+let _quizFlags = [];
+function renderQuizFlags(flags) {
+  const el = document.getElementById('qr-flag');
+  if (!el) return;
+  if (!flags.length) { el.innerHTML = ''; return; }
+  el.innerHTML = `
+    <div class="section-card" style="border-left:4px solid #d4820a;background:#fffaf2">
+      <div class="sc-title" style="color:#b45309">⚑ Responses Worth Discussing</div>
+      <div style="font-size:.78rem;color:#5a4a2a;line-height:1.6;margin-bottom:8px">Some answers point in different directions. Talk these through before finalizing the allocation — they are also noted in the compliance record below.</div>
+      ${flags.map(x => `<div style="font-size:.78rem;color:#3d3220;line-height:1.55;padding:6px 0;border-top:1px dashed #ecd9b5">• ${x}</div>`).join('')}
+    </div>`;
 }
 
 function getEffectiveA2() {
@@ -1474,7 +1517,16 @@ function renderGuidanceAndFlags(s) {
 }
 
 function showQuizResults() {
-  const s1  = calcQScore(A) || 50;
+  // Every question must be answered — never record a defaulted score
+  const missing = Object.keys(QW).filter(k => A[k] === undefined);
+  if (missing.length) {
+    const n = parseInt(missing[0].slice(1), 10);
+    alert('Please answer question ' + n + ' before viewing results.' + (missing.length > 1 ? ' (' + missing.length + ' questions are unanswered.)' : ''));
+    qGo(n);
+    return;
+  }
+  const s1  = calcQScore(A);
+  _quizFlags = getQuizFlags(A, coupleMode ? p1Name : '');
   const date = new Date().toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'});
   document.getElementById('qr-date').textContent = 'Completed: ' + date;
   showView('quiz-results');
@@ -1482,6 +1534,7 @@ function showQuizResults() {
   if (coupleMode) {
     const anyDiffering = Object.keys(A2).length > 0 && Object.keys(A2).some(k => A2[k] !== A[k]);
     if (!anyDiffering) {
+      _quizFlags = getQuizFlags(A, '');
       document.getElementById('qr-single-hero').style.display = '';
       document.getElementById('qr-couple-hero').style.display = 'none';
       document.getElementById('qr-score').textContent = s1;
@@ -1490,11 +1543,16 @@ function showQuizResults() {
         document.getElementById('qr-pin').style.left  = s1 + '%';
       }, 120);
       renderGuidanceAndFlags(s1);
+      renderQuizFlags(_quizFlags);
       renderComplianceBlock(s1, null);
+      window._lastQuizResult = { score: s1, who: p1Name + ' & ' + p2Name, date: new Date().toLocaleDateString('en-US') };
       return;
     }
     const s2raw = calcQScore(getEffectiveA2());
     const s2    = s2raw !== null ? s2raw : null;
+    _quizFlags = _quizFlags.concat(getQuizFlags(getEffectiveA2(), p2Name));
+    if (s2 !== null && Math.abs(s1 - s2) >= 15)
+      _quizFlags.push(`${p1Name} (${s1}) and ${p2Name} (${s2}) differ by ${Math.abs(s1 - s2)} points. Decide which score governs joint accounts, and consider separate allocations for individually owned accounts.`);
     document.getElementById('qr-single-hero').style.display = 'none';
     document.getElementById('qr-couple-hero').style.display = 'grid';
     document.getElementById('csc-name-1').textContent  = p1Name;
@@ -1517,7 +1575,9 @@ function showQuizResults() {
       document.getElementById('qr-pin').style.left = avg + '%';
     }, 120);
     renderGuidanceAndFlags(avg);
+    renderQuizFlags(_quizFlags);
     renderComplianceBlock(s1, s2);
+    window._lastQuizResult = { score: avg, who: p1Name + ' & ' + p2Name + ' (average)', date: new Date().toLocaleDateString('en-US') };
   } else {
     document.getElementById('qr-single-hero').style.display = '';
     document.getElementById('qr-couple-hero').style.display = 'none';
@@ -1527,7 +1587,9 @@ function showQuizResults() {
       document.getElementById('qr-pin').style.left  = s1 + '%';
     }, 120);
     renderGuidanceAndFlags(s1);
+    renderQuizFlags(_quizFlags);
     renderComplianceBlock(s1, null);
+    window._lastQuizResult = { score: s1, who: '', date: new Date().toLocaleDateString('en-US') };
   }
 }
 
@@ -1540,6 +1602,7 @@ function renderComplianceBlock(s1, s2) {
   text += 'Bucket Three Risk Assessment · Compliance Record\n';
   text += '═══════════════════════════════════════════════════════════\n';
   text += 'Date: ' + date + '\n';
+  text += 'Scoring method: ' + QUIZ_SCORING_VERSION + '\n';
   if (coupleMode && anyDiff) {
     text += 'Respondents: ' + p1Name + ' (Score: ' + s1 + ') and ' + p2Name + ' (Score: ' + s2 + ')\n';
     text += 'Note: Individual scores were determined. Where responses differed, both answers are documented below.\n';
@@ -1587,6 +1650,12 @@ function renderComplianceBlock(s1, s2) {
   }
   text += 'SUGGESTED EQUITY ALLOCATION: ' + g.equity + ' of Bucket Three\n';
   text += 'TARGET RETURN: ' + g.target + ' annualized\n';
+  if (_quizFlags && _quizFlags.length) {
+    text += '───────────────────────────────────────────────────────────\n';
+    text += 'ADVISOR REVIEW — RESPONSES WORTH DISCUSSING:\n';
+    _quizFlags.forEach(x => { text += '  ⚑ ' + x + '\n'; });
+    text += '  Discussed with client: ____________________________\n';
+  }
   text += '───────────────────────────────────────────────────────────\n';
   text += 'Securities & Advisory Services offered through LPL Financial, Member FINRA/SIPC.\n';
   text += 'Capital Planning Wealth Management and LPL Financial are separate entities.\n';
@@ -1596,6 +1665,8 @@ function renderComplianceBlock(s1, s2) {
 }
 
 function resetQuiz() {
+  _quizFlags = [];
+  renderQuizFlags([]);
   for (const k in A)  delete A[k];
   for (const k in A2) delete A2[k];
   document.querySelectorAll('.opt').forEach(o => o.classList.remove('sel'));
@@ -1996,7 +2067,7 @@ function copyAnalyzerSummary() {
     summary += padCol('Ticker',8) + padCol('Name',34) + padCol('Type',26) + padCol('Alloc',8) + 'Score\n' + '─'.repeat(80) + '\n';
     rows.forEach(row => {
       const cells = row.querySelectorAll('td');
-      if (cells.length >= 5) summary += padCol(cells[0].textContent.trim(),8) + padCol(cells[1].textContent.trim().substring(0,32),34) + padCol(cells[2].textContent.trim().substring(0,24),26) + padCol(cells[3].textContent.trim(),8) + cells[4].textContent.trim() + '\n';
+      if (cells.length >= 6) summary += padCol(cells[0].textContent.trim(),8) + padCol(cells[1].textContent.trim().substring(0,32),34) + padCol(cells[2].textContent.trim().substring(0,24),26) + padCol(cells[4].textContent.trim(),8) + cells[5].textContent.trim().replace(/[^0-9]/g,'') + '\n';
     });
   }
   summary += '\n─────────────────────────────────────────────────\nDisclosure: Analysis is AI-generated for advisor discussion only. Not investment advice.\n';
@@ -2159,18 +2230,12 @@ function parseCSVLocally(csvText) {
       accountOrder.push(acctName);
     }
 
-    // Assign score locally — classifyHolding first, then TICKER_SCORES table
-    const fakeH = { ticker, name: rawName, type: assetCls, risk_score: 50 };
-    const classified = classifyHolding(fakeH);
-    let score, typeFinal;
-    if (classified) {
-      score = classified.score;
-      typeFinal = classified.type;
-    } else {
-      const local = TICKER_SCORES[ticker] || _sessionScoreCache[ticker];
-      score = local !== undefined ? local : null; // null = needs AI
-      typeFinal = assetCls || '';
-    }
+    // Score locally with the shared engine (verified table → firm rules → session cache).
+    // Anything still unknown is sent to the AI in one batch below.
+    const r = resolveHoldingScore({ ticker, cusip, name: rawName, type: assetCls });
+    const known = r.src !== 'fallback';
+    const score = known ? r.score : null;
+    const typeFinal = (known && r.src === 'rule' && r.type) ? r.type : (assetCls || '');
 
     const holding = {
       ticker,
@@ -2182,6 +2247,7 @@ function parseCSVLocally(csvText) {
       risk_score: score,    // null = unknown, filled by AI batch
       risk_level: score !== null ? riskLevelLabel(score) : 'Unknown',
       _needsScore: score === null,
+      _src: known ? r.src : undefined,
     };
     applyHoldingOverride(holding);
     accountMap[acctName].push(holding);
@@ -2250,7 +2316,9 @@ Individual stocks score HIGHER than ETFs (concentration risk):
 - High-volatility (NVDA,TSLA,AMD): 93-97
 ETFs: Large blend 72-76, Growth 78-84, Small cap 84-88, Intl developed 74-78, EM 80-84
 Bonds: IG corp 28-34, HY 45-52, Short-term 15-22, Muni 20-26
-Cash/MM=5, Annuity=5, Variable Annuity=50, Structured Note=30, CD=5
+Treasury / government bond FUNDS are scored by DURATION: T-bill or 0-3 month 5, short 1-3yr 13-15, intermediate 26-28, long 20+yr 35-42. A bond fund is NEVER 5 unless it is a T-bill fund or money market fund.
+Individual stocks are never below 78.
+Cash/MM=5, Annuity=5, Variable Annuity=50, Structured Note=30, CD=5, Individual Treasury security=5
 
 CRITICAL TICKER OVERRIDES — your training data may have outdated info on these tickers.
 Use ONLY the names and scores below, ignoring any prior knowledge:
@@ -2273,7 +2341,7 @@ Return ONLY a JSON array (no markdown), one entry per security in the same order
           method: 'POST',
           headers: getApiHeaders(),
           body: JSON.stringify({
-            model: 'claude-sonnet-4-6',
+            model: AI_MODEL,
             max_tokens: 2000,
             messages: [{ role: 'user', content: prompt }]
           })
@@ -2307,6 +2375,7 @@ Return ONLY a JSON array (no markdown), one entry per security in the same order
           if ((h.ticker || h.name || '?') === ticker) {
             h.risk_score = score;
             h.risk_level = riskLevelLabel(score);
+            h._src = 'ai';
             if (type && !h.type) h.type = type;
             // Only overwrite the name if the holding's current name looks like
             // a raw ticker or is blank — don't clobber a proper description
@@ -2328,6 +2397,7 @@ Return ONLY a JSON array (no markdown), one entry per security in the same order
     if (h._needsScore) {
       h.risk_score = 50;
       h.risk_level = 'Moderate';
+      h._src = 'fallback';
       delete h._needsScore;
     }
   });
@@ -2409,7 +2479,7 @@ async function analyzePortfolio() {
         method: 'POST',
         headers: getApiHeaders(),
         body: JSON.stringify({
-          model: 'claude-sonnet-4-6',
+          model: AI_MODEL,
           max_tokens: tokensLimit,
           messages: [{ role: 'user', content: [...fileContent, { type:'text', text: prompt }] }]
         })
@@ -2493,7 +2563,7 @@ async function analyzePortfolio() {
 
     allHoldings.forEach(h => {
       const t = (h.ticker||"").toUpperCase().trim();
-      if (t && !TICKER_SCORES[t] && h.risk_score) cacheScore(t, Math.round(parseFloat(h.risk_score)));
+      if (t && !TICKER_SCORES[t] && h.risk_score && !classifyHolding(h)) cacheScore(t, Math.round(parseFloat(h.risk_score)));
       // Fix any stale names the AI returned for recently-reassigned tickers
       applyHoldingOverride(h);
     });
@@ -2539,23 +2609,25 @@ GLD=65 (Gold), VNQ=76 (REITs), EEM=82 (Emerging Mkts)
 IBIT=95 (Bitcoin ETF), Money market/cash=5, Structured note=30, Variable annuity=50 (variable subaccounts have real market exposure), Other annuities=5 (fixed, fixed-indexed, RILA, MYGA, structured annuity, point-to-point — always 5)
 Balanced 60/40 fund~55, Large cap blend~74, Small cap~85-88
 Investment grade short bond~18-22
+Treasury / government bond FUNDS by DURATION: T-bill or 0-3 month 5, short 1-3yr 13-15, intermediate 26-28, long 20+yr 35-42 (e.g. TLT=35, EDV=40). Only INDIVIDUAL Treasury securities, T-bills and money market funds score 5.
+Individual stocks are never below 78 (single-company risk).
 
 ASSET CLASS LABEL RULES — CRITICAL:
 If a file labels holdings as "Multiple" or leaves the asset class blank, you MUST identify the true asset class from the ticker/name alone. NEVER classify a named ETF or mutual fund as cash just because the asset class label says "Multiple" or is missing.
 
 SPECIFIC TICKERS — always use these exact scores regardless of how the file labels them:
 - JMST (JPMorgan Ultra-Short Municipal Income ETF) = risk 18, type "Ultra-Short Bond ETF" — NOT cash
-- VNLA (Janus Henderson Short Duration Income ETF) = risk 20, type "Short Duration Bond ETF" — NOT cash
-- CGMU (Capital Group Municipal Income ETF) = risk 28, type "Municipal Bond ETF" — NOT cash, NOT money market
-- JSI (Janus Henderson Securitized Income ETF) = risk 30, type "Securitized Bond ETF" — NOT cash
+- VNLA (Janus Henderson Short Duration Income ETF) = risk 12, type "Short Duration Bond ETF" — NOT cash
+- CGMU (Capital Group Municipal Income ETF) = risk 22, type "Municipal Bond ETF" — NOT cash, NOT money market
+- JSI (Janus Henderson Securitized Income ETF) = risk 22, type "Securitized Bond ETF" — NOT cash
 - JMUIX (Janus Henderson Multi-Sector Income Fund) = risk 35, type "Multi-Sector Bond Fund" — NOT cash
-- FTCB (First Trust Core Investment Grade ETF) = risk 30, type "Investment Grade Bond ETF" — NOT cash
+- FTCB (First Trust Core Investment Grade ETF) = risk 28, type "Investment Grade Bond ETF" — NOT cash
 - JIVE (JPMorgan International Value ETF) = risk 72, type "International Value ETF" — NOT cash
-- VFLO (VictoryShares Free Cash Flow ETF) = risk 76, type "Large Cap ETF" — NOT cash
-- JSML (Janus Henderson Small Cap Growth Alpha ETF) = risk 85, type "Small Cap ETF" — NOT cash
-- XMHQ (Invesco S&P MidCap Quality ETF) = risk 78, type "Mid Cap ETF" — NOT cash
+- VFLO (VictoryShares Free Cash Flow ETF) = risk 72, type "Large Cap ETF" — NOT cash
+- JSML (Janus Henderson Small Cap Growth Alpha ETF) = risk 84, type "Small Cap ETF" — NOT cash
+- XMHQ (Invesco S&P MidCap Quality ETF) = risk 80, type "Mid Cap ETF" — NOT cash
 - QQQM (Invesco NASDAQ 100 ETF) = risk 85, type "Large Cap Growth ETF" — NOT cash
-- CWI (SPDR MSCI ACWI ex-US ETF) = risk 76, type "International ETF" — NOT cash
+- CWI (SPDR MSCI ACWI ex-US ETF) = risk 77, type "International ETF" — NOT cash
 - SPYV (SPDR S&P 500 Value ETF) = risk 72, type "Large Cap Value ETF" — NOT cash
 - SPYM (SPDR S&P 500 ETF) = risk 74, type "Large Cap Blend ETF" — NOT cash
 
@@ -2563,7 +2635,7 @@ GENERAL RULE — only classify as cash/money market (risk 5) if the holding is e
 - A money market fund (name contains "money market", "MMKT", "sweep", or similar)
 - An actual cash/sweep position with no ticker
 - A T-bill or government money market fund
-Short-duration bond ETFs, ultra-short bond funds, and municipal bond funds are NEVER cash.
+Short-duration bond ETFs, ultra-short bond funds, municipal bond funds and Treasury bond funds (TLT, IEF, GOVT, VGLT…) are NEVER cash.
 
 CRITICAL — Return ONLY valid JSON, no markdown, no explanation. Be concise — short type labels, no extra text:
 {"portfolio_name":"string","accounts":[{"account_name":"string","holdings":[{"ticker":"string","name":"string","type":"string","market_value":number,"allocation_pct":number,"risk_score":number,"risk_level":"string"}]}]}
@@ -2638,6 +2710,8 @@ Nitrogen calibration reference:
   · International developed: 74–78 | Emerging markets: 80–84
   · High yield bond: 45–52 | Investment grade corp: 28–34
   · Balanced 60/40: ~55 | Short-term bond: 15–22 | Money market: 3–5
+  · Treasury / government bond funds by DURATION: T-bill 5 | short 13–15 | intermediate 26–28 | long 35–42 (never 5 unless a T-bill or money market fund)
+  · Individual stocks: never below 78
 - Mutual funds: score based on underlying holdings (e.g. equity fund ~74–85, bond fund ~22–35)
 
 Return ONLY this exact JSON — no markdown, no explanation:
@@ -2709,6 +2783,7 @@ async function searchStock() {
         aum:            ov.aum,
         description:    ov.description,
         analysis:       ov.analysis,
+        _src:           TICKER_SCORES[ticker] !== undefined ? 'table' : 'ai',
       });
       return;
     }
@@ -2721,7 +2796,7 @@ async function searchStock() {
       method: 'POST',
       headers: getApiHeaders(),
       body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
+        model: AI_MODEL,
         max_tokens: 600,
         messages: [{ role: 'user', content: prompt }]
       })
@@ -2740,16 +2815,16 @@ async function searchStock() {
 
     let parsed = JSON.parse(match[0]);
 
-    // Lock score to known value if we have one — never let AI override it
-    if (knownScore !== undefined) parsed.risk_score = knownScore;
-
-    // Ensure risk_level matches score
-    const s = Math.round(parseFloat(parsed.risk_score) || 50);
+    // Same resolver as the portfolio analyzer: verified table → firm rules → AI estimate
+    const rs = resolveHoldingScore({ ticker, name: parsed.name, type: parsed.type, risk_score: parsed.risk_score });
+    const s = rs.score;
     parsed.risk_score = s;
     parsed.risk_level = riskLevelLabel(s);
+    if (rs.src === 'rule' && rs.type) parsed.type = rs.type;
+    parsed._src = rs.src;
 
-    // Cache the result for this session
-    cacheScore(ticker, s);
+    // Cache AI estimates for this session (table / rule scores never need caching)
+    if (rs.src === 'ai') cacheScore(ticker, s);
 
     renderStockResult(parsed);
   } catch(e) {
@@ -2882,29 +2957,20 @@ function renderPortfolio(data) {
     accounts = [{ account_name: data.portfolio_name || 'Portfolio', holdings: data.holdings }];
   }
 
-  // Apply local score + type overrides to every holding in every account.
-  // Priority: 1) classifyHolding (annuity/note/bond/CD detection by name/type)
-  //           2) TICKER_SCORES / session cache (known tickers)
-  //           3) AI-returned score (fallback)
-  //           4) HOLDING_OVERRIDES — fixes stale names for reassigned tickers
+  // Score every holding with the shared engine (see SCORING ENGINE v2):
+  //   verified table → firm rules → AI estimate → default 50 (flagged)
+  // then HOLDING_OVERRIDES fixes stale names for reassigned tickers.
   accounts = accounts.map(acct => ({
     ...acct,
     cash_added: 0,
     holdings: (acct.holdings || []).map(h => {
-      const t = (h.ticker || '').toUpperCase().trim();
-      const classified = classifyHolding(h);
-      const mv = parseFloat(h.market_value) || 0;
-      let holding;
-      if (classified) {
-        holding = { ...h, market_value: mv, risk_score: classified.score, type: classified.type };
-      } else {
-        const local = TICKER_SCORES[t] || _sessionScoreCache[t];
-        holding = { ...h, market_value: mv, risk_score: local !== undefined ? local : (h.risk_score || 50) };
-      }
+      const holding = { ...h, market_value: parseFloat(h.market_value) || 0 };
+      applyResolvedScore(holding);
       applyHoldingOverride(holding);
       return holding;
     })
   }));
+  _scoreCheckOpen = null;
 
   _portfolioAccounts = accounts;
 
@@ -2933,6 +2999,7 @@ function renderPortfolio(data) {
     </div>
 
     <div id="az-risk-align"></div>
+    <div id="az-score-check"></div>
 
     <!-- ── SAVE BUTTONS (top of results) ── -->
     <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
@@ -3023,20 +3090,14 @@ function renderPortfolio(data) {
 function buildAccountAllocHTML(holdings, cashAdded) {
   let eq = 0, fi = 0, cash = cashAdded > 0 ? cashAdded : 0, alt = 0, ann = 0, str = 0;
   holdings.forEach(h => {
-    const mv    = parseFloat(h.market_value) || 0;
-    const score = parseFloat(h.risk_score)   || 50;
-    const t     = (h.type || '').toLowerCase();
-    if (t.includes('annuity'))                                                          ann  += mv;
-    else if (t.includes('structured note') || t.includes('buffer note') ||
-             t.includes('autocall')        || t.includes('barrier note') ||
-             t.includes('reverse convertible') || t.includes('principal protected'))    str  += mv;
-    else if (score <= 6 || t.includes('money market') ||
-             (t.includes('cash') && !t.includes('cash flow')))                          cash += mv;
-    else if (score <= 40 || t.includes('bond') || t.includes('fixed') ||
-             t.includes('municipal') || t.includes('securitized') ||
-             t.includes('income etf') || t.includes('income fund'))                     fi   += mv;
-    else if (t.includes('alt') || t.includes('commodity') || t.includes('real asset'))  alt  += mv;
-    else                                                                                 eq   += mv;
+    const mv = parseFloat(h.market_value) || 0;
+    const b  = assetBucket(h);
+    if (b === 'Annuities')             ann  += mv;
+    else if (b === 'Structured Notes') str  += mv;
+    else if (b === 'Cash')             cash += mv;
+    else if (b === 'Fixed Income')     fi   += mv;
+    else if (b === 'Alternatives')     alt  += mv;
+    else if (b !== 'Debit')            eq   += mv;
   });
   const total = eq + fi + cash + alt + ann + str || 1;
   const pct   = n => (n / total * 100).toFixed(1);
@@ -3117,8 +3178,15 @@ function renderHoldingRow(h, ai, hi) {
   const overrideCls = h._manualOverride ? ' risk-num-override' : '';
   const editable = (ai !== undefined && hi !== undefined);
   const editAttrs = editable
-    ? ` class="risk-num risk-num-edit${overrideCls}" title="Click to edit risk score" onclick="openRiskEdit(${ai},${hi},event)"`
+    ? ` class="risk-num risk-num-edit${overrideCls}" title="Click to edit risk score${(h._manualOverride ? ' · Source: Manual override' : h._src ? ' · Source: ' + (SCORE_SRC_LABELS[h._src] || h._src) : '')}" onclick="openRiskEdit(${ai},${hi},event)"`
     : ` class="risk-num${overrideCls}"`;
+  const srcKey = h._manualOverride ? 'manual' : h._src;
+  const srcTitle = srcKey ? ' · Source: ' + (SCORE_SRC_LABELS[srcKey] || srcKey) : '';
+  const srcTag = !editable ? '' : srcKey === 'ai'
+    ? `<span title="AI estimate — not in the verified table" style="font-size:.5rem;font-weight:800;color:#8a6d1f;background:#f5eed8;border-radius:3px;padding:1px 3px;margin-left:3px;vertical-align:top">AI</span>`
+    : srcKey === 'fallback'
+    ? `<span title="No score found — defaulted to 50" style="font-size:.5rem;font-weight:800;color:#c0392b;background:#fde8e8;border-radius:3px;padding:1px 4px;margin-left:3px;vertical-align:top">?</span>`
+    : '';
   return `<tr>
     <td><span class="ticker-badge">${h.ticker || '—'}</span></td>
     <td style="font-weight:600;font-size:.79rem">${h.name || '—'}</td>
@@ -3128,7 +3196,7 @@ function renderHoldingRow(h, ai, hi) {
       <div class="risk-bar-wrap"><div class="risk-bar-bg"><div class="risk-bar-fill" style="width:${alloc!=='—'?alloc:'0'};background:${col}"></div></div></div>
       <div style="font-size:.68rem;color:#6b7e96">${alloc}</div>
     </td>
-    <td style="text-align:center"><span${editAttrs} style="color:${col}">${Math.round(s)}</span></td>
+    <td style="text-align:center;white-space:nowrap"><span${editAttrs} style="color:${col}">${Math.round(s)}</span>${srcTag}</td>
     <td><span class="risk-badge" style="background:${badgeBg};color:${col}">● ${riskLevelLabel(s)}</span></td>
     ${editable ? `<td style="text-align:center;white-space:nowrap;padding:4px 6px">
       <button class="row-act-btn" title="Edit holding" onclick="openHoldingEdit(${ai},${hi},event)">✎</button>
@@ -3363,7 +3431,7 @@ function fmt$(n) { return n > 0 ? '$' + Math.round(n).toLocaleString('en-US') : 
 
 function recalcPortfolio() {
 
-  let portfolioWeightedScore = 0, portfolioTotalValue = 0;
+  let portfolioWeightedScore = 0, portfolioTotalValue = 0, portfolioScoreWeight = 0;
   let totalEq = 0, totalFi = 0, totalCash = 0, totalAlt = 0, totalAnnuity = 0, totalStructured = 0;
 
   _portfolioAccounts.forEach((acct, ai) => {
@@ -3401,42 +3469,33 @@ function recalcPortfolio() {
 
       // Tally asset classes using market value (or weight proxy)
       const mv = hasMV ? (parseFloat(h.market_value) || 0) : weight;
-      const t  = (h.type || '').toLowerCase();
-      if (t.includes('annuity')) totalAnnuity += mv;
-      else if (t.includes('structured note') || t.includes('buffer note') || t.includes('autocall') ||
-               t.includes('barrier note')    || t.includes('reverse convertible') ||
-               t.includes('participation note') || t.includes('principal protected')) totalStructured += mv;
-      else if (score <= 6 || t.includes('money market') || (t.includes('cash') && !t.includes('cash flow') && !t.includes('cashflow'))) totalCash += mv;
-      else if (score <= 40 || t.includes('bond') || t.includes('fixed') || t.includes('municipal') || t.includes('securitized') || t.includes('income etf') || t.includes('income fund')) totalFi += mv;
-      else if (t.includes('alt') || t.includes('commodity') || t.includes('real asset')) totalAlt += mv;
-      else totalEq += mv;
+      const b  = assetBucket(h);
+      if (b === 'Annuities')             totalAnnuity    += mv;
+      else if (b === 'Structured Notes') totalStructured += mv;
+      else if (b === 'Cash')             totalCash       += mv;
+      else if (b === 'Fixed Income')     totalFi         += mv;
+      else if (b === 'Alternatives')     totalAlt        += mv;
+      else if (b !== 'Debit')            totalEq         += mv;
     });
 
-    // Cash: positive counts as cash (score 5); negative debit increases risk score
-    // A debit balance means the account is leveraged — scored at 85 (high risk)
-    const DEBIT_SCORE = 85;
-    if (cashAdded >= 0) {
-      totalCash += cashAdded;
-    }
-    // (negative cash reduces totalCash naturally via balance math)
+    // Positive cash counts as cash (score 5)
+    if (cashAdded >= 0) totalCash += cashAdded;
 
-    // ── Account risk score ──
-    // Denominator: total invested value + cash (MV path) OR alloc sum + cash (pct path)
-    const acctDenom = hasMV
-      ? acctTotalValue
-      : (acctAllocSum + cashAdded);
-
-    let acctScore;
-    if (acctDenom <= 0) {
-      // Account is fully leveraged or empty
-      acctScore = cashAdded < 0 ? DEBIT_SCORE : 50;
-    } else {
-      // cashAdded < 0 means leverage — it contributes negative value but high-risk weighting
-      const cashScoreContrib = cashAdded >= 0
-        ? cashAdded * 5          // positive cash: conservative, score 5
-        : cashAdded * DEBIT_SCORE; // debit: negative value × 85 raises weighted avg
-      acctScore = Math.min(99, Math.round((acctWeightedScore + cashScoreContrib) / acctDenom));
-    }
+    // ── Account risk score (leverage-aware) ──
+    // Previously a debit balance was blended in at 85, which actually LOWERED the score of
+    // any account whose holdings averaged above 85's pull (e.g. 70-score holdings with a
+    // $20k debit on $100k dropped to 66). Borrowing magnifies risk, so the score now scales
+    // by gross exposure ÷ net value: $100k invested on $80k of net value = 1.25× the risk.
+    const investedBase  = hasMV ? acctInvestedValue : acctAllocSum;
+    const acctDenom     = investedBase + cashAdded;                 // net account value
+    const holdingsScore = investedBase > 0 ? acctWeightedScore / investedBase : 50;
+    const leverage      = (cashAdded < 0 && acctDenom > 0) ? investedBase / acctDenom : 1;
+    let acctScoreRaw;
+    if (cashAdded >= 0)      acctScoreRaw = acctDenom > 0 ? (acctWeightedScore + cashAdded * 5) / acctDenom : 50;
+    else if (acctDenom <= 0) acctScoreRaw = 99;                     // debit ≥ holdings — fully leveraged
+    else                     acctScoreRaw = holdingsScore * leverage;
+    acctScoreRaw = Math.min(99, acctScoreRaw);
+    const acctScore = Math.round(acctScoreRaw);
 
     // ── Update account UI ──
     const scoreEl   = document.getElementById(id + '-score');
@@ -3456,7 +3515,7 @@ function recalcPortfolio() {
     if (levelEl)   { levelEl.textContent = riskLevelLabel(displayScore); levelEl.style.color = riskColor(displayScore); }
     const displayBalance = acctTotalValue > 0 ? acctTotalValue : cashAdded;
     if (balanceEl) { balanceEl.textContent = displayBalance !== 0 ? (displayBalance < 0 ? '(' + fmt$(Math.abs(displayBalance)) + ')' : fmt$(displayBalance)) : '—'; balanceEl.style.color = displayBalance < 0 ? 'var(--red)' : ''; }
-    if (effectEl)  { effectEl.textContent = cashAdded > 0 ? '→ lowers account score' : cashAdded < 0 ? '⚠️ debit balance · raises account score' : ''; effectEl.style.color = cashAdded < 0 ? 'var(--red)' : 'var(--green)'; }
+    if (effectEl)  { effectEl.textContent = cashAdded > 0 ? '→ lowers account score' : cashAdded < 0 ? (acctDenom > 0 ? `⚠️ debit balance · ${leverage.toFixed(2)}× leverage raises account score` : '⚠️ debit exceeds holdings · fully leveraged') : ''; effectEl.style.color = cashAdded < 0 ? 'var(--red)' : 'var(--green)'; }
 
     // ── Refresh per-account alloc strip ──
     const stripEl = document.getElementById(id + '-alloc-strip');
@@ -3473,17 +3532,17 @@ function recalcPortfolio() {
 
     // ── Add to portfolio totals ──
     // If account has a manual score override, use that for the overall weighted average
+    // Overall score = each account's score weighted by its net value, so the banner
+    // always agrees with the account cards (including debit balances and overrides).
     const acctValueForTotal = hasMV ? acctTotalValue : acctDenom;
-    portfolioTotalValue += acctValueForTotal;
-    if (acct._manualScoreOverride !== undefined) {
-      portfolioWeightedScore += acct._manualScoreOverride * acctValueForTotal;
-    } else {
-      portfolioWeightedScore += acctWeightedScore + cashAdded * 5;
-    }
+    const scoreWeight = Math.max(acctValueForTotal, 0);
+    portfolioTotalValue  += acctValueForTotal;
+    portfolioScoreWeight += scoreWeight;
+    portfolioWeightedScore += (acct._manualScoreOverride !== undefined ? acct._manualScoreOverride : acctScoreRaw) * scoreWeight;
   });
 
-  const overallScore = portfolioTotalValue > 0
-    ? Math.round(portfolioWeightedScore / portfolioTotalValue)
+  const overallScore = portfolioScoreWeight > 0
+    ? Math.min(99, Math.round(portfolioWeightedScore / portfolioScoreWeight))
     : 50;
   const riskCol = riskColor(overallScore);
 
@@ -3521,6 +3580,10 @@ function recalcPortfolio() {
     .sort((a, b) => b.val - a.val)
     .map(b => `<div class="alloc-card"><div class="ac-label">${b.label}</div><div class="ac-value">${pct(b.val)}</div></div>`)
     .join('');
+
+  // ── Score Check panel ──
+  const scEl = document.getElementById('az-score-check');
+  if (scEl) scEl.innerHTML = buildScoreCheckHTML();
 }
 
 
@@ -3601,7 +3664,8 @@ ${knownLines ? 'PRE-VERIFIED SCORES (use exactly): ' + knownLines + '\n' : ''}
 HOLDINGS TO SCORE:
 ${holdingsList}
 
-Calibration: SPY=74, QQQ=85, AGG=28, TLT=35, HYG=48, GLD=65, EEM=82, IBIT=95, Money market/cash=5, Variable annuity=50, Other annuities=5, Structured note=30, Bond=20, CD=5
+Calibration: SPY=74, QQQ=85, AGG=28, TLT=35, HYG=48, GLD=65, EEM=82, IBIT=95, Money market/cash=5, Variable annuity=50, Other annuities=5, Structured note=30, CD=5
+Bond FUNDS by duration: T-bill 5, short 13-15, intermediate 26-28, long Treasury 35-42 (a bond fund is never 5 unless it is a T-bill/money market fund). Individual bonds 10-24 by maturity. Individual stocks never below 78.
 
 Return ONLY valid JSON array, no markdown:
 [{"ticker":"","name":"","type":"","risk_score":0}]
@@ -3617,7 +3681,7 @@ Rules:
       method: 'POST',
       headers: getApiHeaders(),
       body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
+        model: AI_MODEL,
         max_tokens: 2000,
         messages: [{ role: 'user', content: prompt }]
       })
@@ -3635,13 +3699,12 @@ Rules:
       const ticker = inputs[0].value.trim().toUpperCase();
       const name   = inputs[1].value.trim();
 
-      // Apply classifyHolding overrides first
-      const fakeH = { ticker, name, type: s.type || '', risk_score: s.risk_score };
-      const classified = classifyHolding(fakeH);
-      const finalScore = classified ? classified.score : (TICKER_SCORES[ticker] ?? _sessionScoreCache[ticker] ?? s.risk_score ?? 50);
-      const finalType  = classified ? classified.type : (s.type || '');
+      // Shared engine: verified table → firm rules → AI estimate
+      const rs = resolveHoldingScore({ ticker, name: name || s.name || '', type: s.type || '', risk_score: s.risk_score });
+      const finalScore = rs.score;
+      const finalType  = (rs.src === 'rule' && rs.type) ? rs.type : (s.type || '');
 
-      _aaRowScores[ticker || ('_row_' + i)] = { score: finalScore, type: finalType, name: s.name || name };
+      _aaRowScores[ticker || ('_row_' + i)] = { score: finalScore, type: finalType, name: s.name || name, src: rs.src };
 
       // Fill in name if the user left it blank and AI provided one
       if (!name && s.name) inputs[1].value = s.name;
@@ -3684,11 +3747,10 @@ function confirmAddAccount() {
     if (!ticker && !name) return; // skip blank rows
 
     const scoreData = _aaRowScores[ticker || ('_row_' + i)] || {};
-    // Apply classifyHolding one more time as safety net
-    const fakeH = { ticker, name, type: scoreData.type || '', risk_score: scoreData.score || 50 };
-    const classified = classifyHolding(fakeH);
-    const finalScore = classified ? classified.score : (TICKER_SCORES[ticker] ?? _sessionScoreCache[ticker] ?? scoreData.score ?? 50);
-    const finalType  = classified ? classified.type : (scoreData.type || 'Unknown');
+    // Shared engine as a safety net (rows the advisor never scored default to 50 and get flagged)
+    const rs = resolveHoldingScore({ ticker, name, type: scoreData.type || '', risk_score: scoreData.score });
+    const finalScore = rs.score;
+    const finalType  = (rs.src === 'rule' && rs.type) ? rs.type : (scoreData.type || 'Unknown');
 
     holdings.push({
       ticker,
@@ -3697,7 +3759,8 @@ function confirmAddAccount() {
       market_value: mv,
       allocation_pct: 0, // recalculated below
       risk_score: finalScore,
-      risk_level: riskLevelLabel(finalScore)
+      risk_level: riskLevelLabel(finalScore),
+      _src: (rs.src === 'ai' && scoreData.src) ? scoreData.src : rs.src
     });
   });
 
@@ -3745,21 +3808,27 @@ function inferSubCategory(h) {
   const nm  = (h.name   || '').toLowerCase();
   const tk  = (h.ticker || '').toUpperCase();
   const s   = parseFloat(h.risk_score) || 50;
+  const txt = t + ' ' + nm;
 
-  // Hard-typed first
-  if (t.includes('annuity'))                         return 'Annuities';
-  if (t.includes('structured note') || t.includes('buffer note') ||
-      t.includes('autocall') || t.includes('barrier') ||
-      t.includes('principal protected') || t.includes('participation note')) return 'Structured Notes';
-  if ((t.includes('cash') && !t.includes('cash flow') && !t.includes('cashflow')) || t.includes('money market') || s <= 6) return 'Cash & Money Market';
-  if (t.includes('cd') || nm.includes(' cd ') || nm.includes('certificate')) return 'CDs';
+  // Debit = borrowed money. It doesn't move with markets, so it gets its own
+  // category (impact 0) and losses are measured against the client's NET value.
+  if (/debit/.test(t)) return 'Debit / Margin Balance';
 
-  // Bonds by duration / type
-  if (t.includes('treasury') || tk === 'BIL' || tk === 'SHV' || tk === 'SGOV' || tk === 'TBLL') return 'US Treasuries';
-  if (t.includes('municipal') || t.includes('muni'))                         return 'Municipal Bonds';
-  if (t.includes('high yield') || t.includes('junk') || (t.includes('bond') && s >= 45)) return 'High Yield Bonds';
-  if (t.includes('international') && (t.includes('bond') || t.includes('fixed')))         return 'International Bonds';
-  if (t.includes('bond') || t.includes('fixed income') || t.includes('aggregate') || (s > 8 && s <= 38)) return 'Investment Grade Bonds';
+  const b = assetBucket(h);
+  if (b === 'Annuities')        return 'Annuities';
+  if (b === 'Structured Notes') return 'Structured Notes';
+  if (/\bcds?\b|certificate of deposit/.test(t) || nm.includes('certificate of deposit')) return 'CDs';
+  if (b === 'Cash')             return 'Cash & Money Market';
+
+  // Bonds by type / duration
+  if (b === 'Fixed Income') {
+    if (/treasury|govt|government|\btips\b/.test(txt) || ['BIL','SHV','SGOV','TBLL'].includes(tk))
+      return (s >= 33 || /\blong\b|extended|20\+|strips|zero coupon/.test(txt)) ? 'Long-Term Treasuries' : 'US Treasuries';
+    if (/municipal|\bmuni/.test(txt))                                               return 'Municipal Bonds';
+    if (/high yield|junk|fallen angel|bank loan|leveraged loan/.test(txt) || s >= 45) return 'High Yield Bonds';
+    if (/international|global|emerging|foreign|world/.test(txt))                     return 'International Bonds';
+    return 'Investment Grade Bonds';
+  }
 
   // Equity by geography + style
   if (t.includes('emerging') || nm.includes('emerging'))                     return 'Emerging Markets';
@@ -3808,6 +3877,8 @@ const DD_COLORS = {
   'Balanced / Target Date':'#7c3aed',
   'Investment Grade Bonds':'#16a34a',
   'US Treasuries':      '#15803d',
+  'Long-Term Treasuries':'#0f5132',
+  'Debit / Margin Balance':'#c0392b',
   'Municipal Bonds':    '#166534',
   'High Yield Bonds':   '#ca8a04',
   'International Bonds':'#4d7c0f',
@@ -3876,15 +3947,12 @@ function inferPieSleeve(h) {
   const nm = (h.name  || '').toLowerCase();
   const tk = (h.ticker|| '').toUpperCase();
   const s  = parseFloat(h.risk_score) || 50;
-  if (t.includes('annuity'))                                                    return 'Annuities';
-  if (t.includes('structured note') || t.includes('buffer note') ||
-      t.includes('autocall') || t.includes('barrier') ||
-      t.includes('principal protected') || t.includes('participation note'))    return 'Structured Notes';
-  if (s <= 6 || t.includes('money market') || (t.includes('cash') && !t.includes('cash flow') && !t.includes('cashflow')) ||
-      t.includes('cd') || nm.includes('certificate of deposit'))               return 'Cash & Money Market';
-  if (s <= 40 || t.includes('bond') || t.includes('fixed income') ||
-      t.includes('treasury') || t.includes('municipal') ||
-      t.includes('aggregate') || t.includes('high yield'))                     return 'Fixed Income';
+  if (/debit/.test(t))                                                          return 'Debit';
+  const b = assetBucket(h);
+  if (b === 'Annuities')                                                        return 'Annuities';
+  if (b === 'Structured Notes')                                                 return 'Structured Notes';
+  if (b === 'Cash')                                                             return 'Cash & Money Market';
+  if (b === 'Fixed Income')                                                     return 'Fixed Income';
   if (t.includes('real estate') || t.includes('reit') || t.includes('commodity') ||
       t.includes('gold') || t.includes('silver') ||
       ['VNQ','XLRE','IYR','SCHH','GLD','IAU','SLV','PDBC','GSG','DJP','USO'].includes(tk)) return 'Real Assets';
@@ -3945,7 +4013,9 @@ function renderDDPie() {
   let total = 0;
   holdings.forEach(h => {
     const mv = parseFloat(h.market_value) || 0;
-    buckets[inferPieSleeve(h)] = (buckets[inferPieSleeve(h)] || 0) + mv;
+    if (mv <= 0) return;                        // debit balances aren't a slice of the pie
+    const k = inferPieSleeve(h);
+    buckets[k] = (buckets[k] || 0) + mv;
     total += mv;
   });
   drawDonutSVG(svg, legend, buckets, total, 'PORTFOLIO', 'ALLOCATION');
@@ -3959,6 +4029,7 @@ function renderDDSubAssets() {
   let total = 0;
   holdings.forEach(h => {
     const mv  = parseFloat(h.market_value) || 0;
+    if (mv <= 0) return;                        // debit shown on the account card, not as a category
     const cat = inferSubCategory(h);
     cats[cat] = (cats[cat] || 0) + mv;
     total += mv;
@@ -4041,11 +4112,12 @@ Write a 4-paragraph client-facing analysis covering:
 3. Areas to be mindful of — any concentration risks, gaps, or things worth discussing with your advisor (keep this constructive, not alarming)
 4. One forward-looking thought — how this portfolio is positioned for the road ahead
 
+Start with one line formatted exactly as "Subject: <a short, warm subject line>", then a blank line, then the paragraphs.
 Format as plain paragraphs — NO bullet points, NO headers, NO markdown. Write as if speaking directly to the client. Keep it under 280 words total. Be specific to their actual numbers.`;
 
   try {
     const requestBody = {
-      model: 'claude-sonnet-4-6',
+      model: AI_MODEL,
       max_tokens: 600,
       messages: [{ role: 'user', content: prompt }]
     };
@@ -4400,12 +4472,23 @@ const STRESS_SCENARIOS = {
   }
 };
 
+// Long-duration Treasuries behave very differently from intermediate bonds
+// (e.g. −33% in 2022, but a cushion in 2008/2020). Approximate total returns
+// for a 20+ year Treasury index over each scenario window.
+const LONG_TREASURY_IMPACTS = {
+  '2008': +17, 'covid': +14, '2022': -33, 'dotcom': +32, 'stagflation': -28,
+  'bull2013': -13, 'bull2017': +9, 'bull2021': -5
+};
+Object.entries(LONG_TREASURY_IMPACTS).forEach(([k, v]) => {
+  if (STRESS_SCENARIOS[k]) STRESS_SCENARIOS[k].impacts['Long-Term Treasuries'] = v;
+});
+
 let _stActiveScenario = '2008';
 let _stCustomResult = null;
 
 // ── Income Bridge (stability cushion) ──
 const STABLE_CATEGORIES = [
-  'Cash & Money Market', 'CDs', 'US Treasuries', 'Investment Grade Bonds',
+  'Cash & Money Market', 'CDs', 'US Treasuries', 'Long-Term Treasuries', 'Investment Grade Bonds',
   'Municipal Bonds', 'International Bonds', 'Annuities'
 ];
 let _stDistAmount = '';      // persists across scenario tabs
@@ -4848,6 +4931,12 @@ function buildRiskAlignmentSection() {
   const port = getPortfolioRiskScore();
   _stRAData = { port };
   if (port == null) { _stRAData = null; return ''; }
+  let fromQuiz = false;
+  if (_stToleranceScore === '' && window._lastQuizResult) { _stToleranceScore = String(window._lastQuizResult.score); fromQuiz = true; }
+  const q = window._lastQuizResult;
+  const tolSub = (q && String(q.score) === String(_stToleranceScore))
+    ? `from questionnaire${q.who ? ' · ' + q.who : ''} · ${q.date}`
+    : 'manually entered target';
   const tolVal = _stToleranceScore !== '' ? ` value="${_stToleranceScore}"` : '';
   return `
     <div class="st-ra">
@@ -4864,7 +4953,7 @@ function buildRiskAlignmentSection() {
         <div class="st-ra-card">
           <div class="st-ra-lbl">Client Risk Tolerance</div>
           <input id="st-ra-tol" class="st-ra-input" type="number" min="1" max="99" step="1" placeholder="—"${tolVal} oninput="updateRiskAlignment()">
-          <div class="st-ra-sub">manually entered target</div>
+          <div class="st-ra-sub">${tolSub}</div>
         </div>
         <div class="st-ra-card st-ra-narr" id="st-ra-narr">Enter the client's risk tolerance score (from the questionnaire) to compare it against what their portfolio is actually taking on.</div>
       </div>
@@ -5271,7 +5360,8 @@ function renderStockResult(d) {
       <div class="sr-metric"><div class="sr-mlbl">Risk Score</div><div class="sr-mval" style="color:${col}">${Math.round(s)} / 100</div></div>
     </div>
     ${d.description ? '<div class="sr-analysis" style="margin-bottom:12px">' + d.description + '</div>' : ''}
-    ${d.analysis    ? '<div class="sr-analysis">' + d.analysis + '</div>' : ''}`;
+    ${d.analysis    ? '<div class="sr-analysis">' + d.analysis + '</div>' : ''}
+    ${d._src ? '<div style="margin-top:10px;font-size:.68rem;color:var(--slate)">Score source: <strong>' + (SCORE_SRC_LABELS[d._src] || d._src) + '</strong>' + (d._src === 'ai' ? ' — not yet in the verified table; confirm before using with clients.' : '') + '</div>' : ''}`;
 }
 
 // ══ TICKER SCORING ══
@@ -5281,8 +5371,8 @@ function renderStockResult(d) {
 // Refresh cycle: stale entries (6+ months) are re-verified on next lookup.
 
 const TICKER_SCORE_META = {
-  version: '2026.03',
-  reviewed: '2026-03-06',
+  version: '2026.11',
+  reviewed: '2026-11-24',   // Scoring engine v2: verified table first, Treasury funds by duration
   // Set to true to force re-verify ALL tickers via web (use every ~6 months)
   forceRefresh: false
 };
@@ -6037,6 +6127,28 @@ const TICKER_SCORES = {
   IONQ:97,   // IonQ — quantum computing, highly speculative
   RGTI:97,   // Rigetti Computing — quantum, speculative
   QBTS:97,   // D-Wave Quantum — quantum, speculative
+
+  // ══════════════════════════════════════════════════════════════
+  // NOV 2026 ACCURACY CORRECTIONS — listed last so they override any
+  // earlier duplicate entry for the same ticker.
+  // ══════════════════════════════════════════════════════════════
+  // Money market fund that was scored like an equity fund (74)
+  AGPXX:5, JMST:18,
+  // Leveraged / options ETFs that were under-scored
+  USD:96,    // ProShares Ultra Semiconductors (2x)
+  NAIL:97,   // Direxion 3x Homebuilders
+  DRN:95,    // Direxion 3x Real Estate
+  PFIX:80,   // Simplify Interest Rate Hedge — options on rates, very volatile
+  // Single stocks: firm rule = individual stocks score at or above SPY (74)
+  // because of single-company risk. These defensive names sat below SPY.
+  JNJ:78, PG:78, KO:78, PEP:78, MCD:78, MRK:78, DUK:78, SO:78,
+  WMT:80, COST:80, PFE:80, CMCSA:80, DE:80, T:80, VZ:80, TMUS:80, NEE:80, D:80,
+  AMT:80, PLD:80, O:80, WELL:80, ROK:80,
+  RTX:78, HON:78, LMT:78, NOC:78, GD:78, 'BRK.B':78, 'BRK.A':78,
+  DIS:82, SBUX:82, MMM:82, SPG:82, GLW:82, HPE:84,
+  // Treasury index funds by duration (common in 401k rollovers)
+  VFISX:14, VSBSX:14, SCHO:14, IEI:22, VFITX:27, VSIGX:27, GOVT:26,
+  TLH:32, VUSTX:35, VLGSX:35, FNBGX:35, SCHQ:35,
 };
 
 // ── Client-name extraction from account labels ──
@@ -6123,104 +6235,338 @@ function isCusip(str) {
   return false;
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// SCORING ENGINE v2 — Nov 2026
+// One resolver is used by EVERY module (analyzer, add-account, single
+// ticker, proposal builder) so the same holding always gets the same score.
+//
+// Order of precedence:
+//   1. Advisor manual override            (h._manualOverride)
+//   2. Verified TICKER_SCORES table       (known tickers always win)
+//   3. Rule-based classification          (cash, annuities, CDs, individual
+//                                           bonds, Treasury funds by duration,
+//                                           structured notes)
+//   4. Session cache / AI estimate
+//   5. Fallback 50                        (flagged in Score Check)
+//
+// Every resolved holding is tagged h._src = 'manual'|'table'|'rule'|'ai'|'fallback'
+// so the Score Check panel can show exactly where each number came from.
+//
+// FIRM RULES KEPT: cash / money market / CDs / fixed & indexed annuities = 5,
+// individual US Treasury securities = 5, variable annuities = 50,
+// structured notes = 30.
+// CHANGED: Treasury & government bond FUNDS are no longer forced to 5 —
+// they are scored by duration (T-bill 5 · short 14 · intermediate 27 · long 37).
+// ══════════════════════════════════════════════════════════════════════
+
+const _FUND_WORDS_RE = /\b(etf|etfs|fund|funds|index|portfolio|ishares|vanguard|spdr|schwab|fidelity|invesco|pimco|blackrock|admiral|investor|instl|institutional|shares|shs|class [a-z0-9]|cl [a-z])\b/i;
+const _COUPON_RE     = /\d+(?:\.\d+)?\s?%/;
+const _TSY_WORD_RE   = /\b(treasury|treasuries|treas|t-bills?|tbills?|t bill|t-notes?|t-bonds?|strips|us govt|u\.s\. govt|united states govt|government|govt)\b/i;
+const _FOREIGN_GOV_RE= /\b(canada|canadian|mexico|mexican|japan|brazil|germany|german|france|french|italy|spain|australia|province|provincial|republic of|kingdom of|sovereign|intl|international|global|world|emerging|ex-us|ex us|foreign)\b/i;
+const _AGENCY_RE     = /\b(fnma|fhlmc|fhlb|ffcb|freddie mac|fannie mae|federal home loan|federal farm credit|ginnie mae|gnma|tennessee valley)\b/i;
+const _HY_RE         = /\b(high yield|hi yld|hi-yld|junk|subordinated|jr sub|pik|convertible|conv)\b/i;
+
+// Phrases that only show up on structured products. Generic words that used to
+// misfire ("linked" → inflation-linked bond funds, "absolute return",
+// "contingent", "floored", "mtn") were removed.
+const _STRUCT_STRONG = [
+  'structured note','structured product','market linked','market-linked','principal protected',
+  'capital protected','autocall','auto-call','auto call','buffer note','buffered note',
+  'barrier note','reverse convertible','reverse exchangeable','equity linked','equity-linked',
+  'index linked note','index-linked note','contingent coupon','contingent income',
+  'contingent interest','trigger','lnkd','lkd to','note lkd','linked to','participation note','phoenix note','phoenix autocall',
+  'enhanced participation','cap note','capped note','dual directional','digital note',
+  'callable yield note','leveraged note','absolute return note'
+];
+
+function _isTradableTicker(t) { return /^[A-Z]{1,5}(\.[A-Z])?$/.test(t || '') && t !== 'CASH'; }
+
+// Does this holding look like a pooled fund (ETF / mutual fund) rather than an
+// individual security?
+function _looksLikeFund(h) {
+  const t    = (h.ticker || '').trim().toUpperCase();
+  const name = h.name || '';
+  const txt  = name + ' ' + (h.type || '');
+  // Coupon / maturity descriptors mean an individual bond or note, not a fund
+  if (_COUPON_RE.test(name) || /\b(due|dtd|b\/e|matures?|maturity)\b/i.test(name)) return false;
+  if (_FUND_WORDS_RE.test(txt)) return true;
+  if (/^[A-Z]{4}X$/.test(t) && !/XX$/.test(t)) return true;   // mutual fund ticker convention
+  return false;
+}
+
+// Years until the latest future date found in a bond description
+function _yearsToMaturity(txt) {
+  const cy = new Date().getFullYear();
+  const years = [];
+  (txt.match(/\b(?:19|20)\d{2}\b/g) || []).forEach(y => years.push(+y));
+  let m;
+  const reDate = /\b\d{1,2}\/\d{1,2}\/(\d{2,4})\b/g;
+  while ((m = reDate.exec(txt))) { let y = +m[1]; if (y < 100) y += 2000; years.push(y); }
+  const rePacked = /%\s*(\d{2})(\d{2})(\d{2})\b/g;              // LPL style "3.250% 022326" = MMDDYY
+  while ((m = rePacked.exec(txt))) years.push(2000 + +m[3]);
+  const future = years.filter(y => y >= cy && y <= cy + 60);
+  return future.length ? Math.max(...future) - cy : null;
+}
+
+// Individual (non-Treasury) bonds: short paper stays at the firm's 10;
+// longer maturities and high-yield credit score higher.
+function _individualBondScore(combined, rawName) {
+  const yrs = _yearsToMaturity(rawName + ' ' + combined);
+  let s = (yrs == null) ? 10 : yrs <= 3 ? 10 : yrs <= 7 ? 13 : yrs <= 12 ? 17 : 22;
+  if (_HY_RE.test(combined)) s += 14;
+  return s;
+}
+
+// Treasury / government bond FUNDS scored by duration (matches the verified table:
+// SGOV 5 · SHY 15 · VGSH 14 · IEF 28 · VGIT 26 · TLT 35 · VGLT 35 · EDV 40)
+function _treasuryFundDuration(s) {
+  s = (s || '').toLowerCase();
+  if (/\b(bills?|ultra[- ]?short|floating|float)\b|0-3 ?mo|0-3 month|1-3 month|0-1 year|money market/.test(s))
+    return { score: 5,  label: 'Treasury Bill / Floating Rate Fund' };
+  if (/\btips\b|inflation/.test(s))
+    return /\bshort\b|0-5|1-5/.test(s) ? { score: 20, label: 'Short-Term TIPS Fund' } : { score: 28, label: 'TIPS Fund' };
+  if (/\b(long|extended|zero coupon|strips)\b|20\+|25\+|10\+|10-20|20-30|25-30/.test(s))
+    return { score: 37, label: 'Long-Term Treasury Fund' };
+  if (/\b(intermediate|interm|int-term)\b|3-7|3-10|5-10|7-10/.test(s))
+    return { score: 27, label: 'Intermediate Treasury Fund' };
+  if (/\bshort\b|short-term|1-3|0-5|1-5/.test(s))
+    return { score: 14, label: 'Short-Term Treasury Fund' };
+  return { score: 26, label: 'Government Bond Fund' };
+}
+
+function _isIndividualTreasury(h, combined) {
+  if (!_TSY_WORD_RE.test(combined) || _FOREIGN_GOV_RE.test(combined)) return false;
+  if (_looksLikeFund(h)) return false;
+  if (/money market|\bmmf\b|sweep/.test(combined)) return false;
+  // "...digital asset treasury company" etc. — a stock, not a Treasury
+  if (/\b(stock|equity|common|adr|inc|corp|company|holdings)\b/.test(combined) && !_COUPON_RE.test(h.name || '')) return false;
+  const t = (h.ticker || '').replace(/\s/g, '');
+  return _COUPON_RE.test(h.name || '') ||
+         /\b(bills?|notes?|nts|bonds?|bds|strips|tips)\b/.test(combined) ||
+         /^912/.test(t) ||                                   // Treasury CUSIPs start with 912
+         /\d{1,2}\/\d{1,2}\/\d{2,4}/.test(h.name || '');
+}
+
+function _structuredHit(combined, type, fundLike) {
+  const isBank = STRUCTURED_ISSUERS.some(b => new RegExp('\\b' + b.replace(/ /g, '\\s+') + '\\b').test(combined));
+  // Defined-outcome / buffer ETFs are funds — not notes (they go to the table or AI, ~45)
+  if (fundLike && !/\bnotes?\b|structured/.test(type)) return { strong: false, isBank };
+  const strong = _STRUCT_STRONG.some(k => combined.includes(k)) ||
+                 /\bfin(?:l|ance)?\s+(?:co\s+)?llc\b/.test(combined) ||      // "JPMorgan Chase Finl Co LLC", "GS Finance LLC"
+                 /\bstructured\b|\bnotes?\b/.test(type) ||
+                 (isBank && /\bnotes?\b|\bnote due\b|\bmtn\b|\bbuffered?\b|\bbarrier\b|\bcapped\b/.test(combined));
+  return { strong, isBank };
+}
+
+function _noteTypeLabel(combined) {
+  return /buffer/.test(combined) ? 'Buffer Note'
+    : /autocall|auto-call|auto call|phoenix/.test(combined) ? 'Autocall Note'
+    : /barrier/.test(combined) ? 'Barrier Note'
+    : /reverse convertible|reverse exchangeable/.test(combined) ? 'Reverse Convertible Note'
+    : /principal protected|capital protected/.test(combined) ? 'Principal Protected Note'
+    : /leveraged|enhanced participation|participation/.test(combined) ? 'Participation Note'
+    : 'Structured Note';
+}
+
 function classifyHolding(h) {
-  const name    = (h.name||'').toLowerCase();
-  const ticker  = (h.ticker||'').trim();
-  const type    = (h.type||'').toLowerCase();
+  const rawName  = (h.name || '').trim();
+  const name     = rawName.toLowerCase();
+  const ticker   = (h.ticker || h.cusip || '').trim().toUpperCase();
+  const type     = (h.type || '').toLowerCase();
   const combined = name + ' ' + type;
+  const fundLike = _looksLikeFund(h);
 
-  // ── CASH / MONEY MARKET / INSURED DEPOSITS → score: 5 ──
-  // Includes: cash, sweeps, money market funds, insured cash accounts, bank deposits
-  if (
-    ticker === 'CASH' || name === 'cash' ||
-    type.includes('money market') || name.includes('money market') ||
-    name.includes('sweep') || name.includes('insured cash') ||
-    name.includes('fdic') || name.includes('bank deposit') ||
-    type.includes('cash') || type.includes('savings')
-  ) return { score:5, type:'Cash / Money Market' };
+  // ── CASH / MONEY MARKET / SWEEP / INSURED DEPOSITS → 5 ──
+  const isMMTicker = /^[A-Z]{3}XX$/.test(ticker);      // money market funds end in "XX" (SPAXX, VMFXX, AGPXX…)
+  const mmWords    = /money market|\bmmkt\b|\bmmf\b|\bsweep\b|insured cash|insured deposit|\bfdic\b|bank deposit|deposit (program|account|sweep)|cash reserves?/.test(combined);
+  const cashLabel  = ticker === 'CASH' || name === 'cash' || /^cash\b/.test(name) ||
+                     (/\bcash\b/.test(type) && !/cash flow|cashflow|cash cow/.test(combined)) ||
+                     /\bsavings\b/.test(type);
+  // Custodians often label ultra-short / muni BOND funds "Cash Alternatives" — those are not cash
+  const bondFundInCashClothing = cashLabel && fundLike && !mmWords && !isMMTicker &&
+        /\b(bond|income|duration|ultra|short|muni|municipal|treasury|floating|credit|enhanced|maturity)\b/.test(name);
+  if (isMMTicker || mmWords || (cashLabel && !bondFundInCashClothing))
+    return { score: 5, type: 'Cash / Money Market' };
 
-  // ── VARIABLE ANNUITIES → score: 50 ──
-  // Variable annuities have real market exposure through subaccounts; treated as moderate risk.
-  // Checked BEFORE the generic annuity catch so variable VAs don't fall through to score 5.
-  const isVariableAnnuity =
-    combined.includes("variable annuity") || combined.includes("variable annuities") ||
-    combined.includes("var annuity") ||
-    type.includes("variable annuity") || type.includes("variable insurance") ||
-    type === "variable" ||   // eMoney exports "Variable" as the asset class for VAs
-    // "variable" + "annuity" anywhere in name (handles "ABC Variable XYZ Annuity")
-    (combined.includes("variable") && (combined.includes("annuity") || combined.includes("annuit"))) ||
-    // VA subaccounts
-    combined.includes("subaccount") || combined.includes("sub-account") || combined.includes("sub account");
-  if (isVariableAnnuity) return { score: 50, type: "Variable Annuity" };
+  // ── VARIABLE ANNUITIES → 50 (checked before the generic annuity rule) ──
+  const isVA = /variable annuit|var annuity|variable insurance|subaccount|sub-account|sub account/.test(combined) ||
+               type.trim() === 'variable' ||                         // eMoney exports "Variable" for VAs
+               (/\bvariable\b/.test(combined) && /annuit/.test(combined));
+  if (isVA) return { score: 50, type: 'Variable Annuity' };
 
-  // ── ANNUITIES → score: 5 ──
-  // Fixed, fixed-indexed, MYGA, structured annuities — all insurance products
-  // Checked BEFORE structured notes — a "structured annuity" is still an annuity
-  const isAnnuity =
-    combined.includes("annuity") || combined.includes("annuitie") ||
-    combined.includes("fixed indexed") || combined.includes("fixed-indexed") ||
-    combined.includes("myga") || combined.includes("multi-year guaranteed") ||
-    combined.includes("variable annuity") || combined.includes("immediate annuity") ||
-    combined.includes("deferred annuity") || combined.includes("income annuity") ||
-    combined.includes("point-to-point") || combined.includes("point to point") ||
-    combined.includes("index annuity") || combined.includes("indexed annuity") ||
-    combined.includes("fia ") || combined.includes("rila") ||
-    type.includes("annuity") || type.includes("insurance product") || type.includes("insurance");
-  if (isAnnuity) return { score:5, type:"Annuity" };
+  // ── FIXED / INDEXED / RILA / MYGA ANNUITIES → 5 ──
+  // (The old rule matched ANY type containing "insurance", which turned insurance-sector
+  //  ETFs and insurance stocks into annuities at 5.)
+  const isAnnuity = /annuit/.test(combined) ||
+        /fixed[- ]indexed|\bmyga\b|multi[- ]year guaranteed|point[- ]to[- ]point|\bfia\b|\brila\b|registered index[- ]linked|insurance (product|contract)/.test(combined) ||
+        (/^\s*(insurance|insurance\/annuity)\s*$/.test(type) && !_isTradableTicker(ticker));
+  if (isAnnuity) return { score: 5, type: 'Annuity' };
 
-  // ── CDs → score: 5 ──
-  // Brokered CDs, callable CDs, market-linked CDs — all treated as conservative cash-like
-  if (
-    CD_KEYWORDS.some(k => combined.includes(k)) ||
-    combined.includes('market linked cd') || combined.includes('market-linked cd') || combined.includes('mlcd')
-  ) return { score:5, type:'CD' };
+  // ── CDs (brokered, callable, market-linked) → 5 ──
+  const isCD = CD_KEYWORDS.some(k => combined.includes(k)) ||
+               /market[- ]linked cd|\bmlcd\b/.test(combined) ||
+               /\bcds?\b/.test(type) ||
+               (!fundLike && /\bcds?\b/.test(name) && (_COUPON_RE.test(rawName) || /\b(bank|bk|na|fsb|ssb)\b/.test(name) || isCusip(ticker)));
+  if (isCD) return { score: 5, type: 'CD' };
 
-  // ── US TREASURIES, GOVT MONEY MARKET, T-BILLS → score: 5 ──
-  // Any US government-issued security is treated as conservative (score 5)
-  const isTreasury =
-    combined.includes('treasury') || combined.includes('t-note') || combined.includes('t-bond') ||
-    combined.includes('t-bill') || combined.includes('tbill') || combined.includes('t bill') ||
-    combined.includes('united states treasury') || combined.includes('us treasury') ||
-    combined.includes('u.s. treasury') || combined.includes('u.s. govt') ||
-    combined.includes('us govt') || combined.includes('united states govt') ||
-    combined.includes('government money market') || combined.includes('govt money market') ||
-    combined.includes('federal money market') ||
-    // Treasury ETFs / tickers
-    ticker === 'BIL' || ticker === 'SHV' || ticker === 'SGOV' || ticker === 'TBLL' ||
-    ticker === 'USFR' || ticker === 'CLTL' || ticker === 'TFLO' || ticker === 'VGSH' ||
-    ticker === 'IEF' || ticker === 'TLT' || ticker === 'GOVT' || ticker === 'SCHO' ||
-    ticker === 'SCHR' || ticker === 'SCHQ' || ticker === 'VGIT' || ticker === 'VGLT';
-  if (isTreasury) return { score:5, type:'US Treasury' };
+  // ── INDIVIDUAL US TREASURY SECURITIES → 5 (firm rule) ──
+  if (_isIndividualTreasury(h, combined)) {
+    return { score: 5, type: /\bbills?\b|t-bill|tbill/.test(combined) ? 'US Treasury Bill' : 'US Treasury' };
+  }
 
-  // ── INDIVIDUAL BONDS → score: 10 ──
-  // Munis, corporates, agency bonds
-  if (BOND_KEYWORDS.some(k => combined.includes(k))) {
-    const bondType = combined.includes('municipal') || combined.includes(' muni') ? 'Municipal Bond'
-      : combined.includes('corporate') ? 'Corporate Bond'
-      : combined.includes('agency') ? 'Agency Bond'
+  // ── TREASURY / GOVERNMENT BOND FUNDS → scored by duration ──
+  if (fundLike && _TSY_WORD_RE.test(combined) && !_FOREIGN_GOV_RE.test(combined) && !/\b(equity|stock)\b/.test(combined)) {
+    const d = _treasuryFundDuration(combined);
+    return { score: d.score, type: d.label, note: 'duration' };
+  }
+
+  const sh = _structuredHit(combined, type, fundLike);
+
+  // ── INDIVIDUAL BONDS (muni, corporate, agency) → 10–36 by maturity & credit ──
+  const looksIndividualBond = !fundLike && !sh.strong && (
+        BOND_KEYWORDS.some(k => combined.includes(k)) || _AGENCY_RE.test(combined) ||
+        (_COUPON_RE.test(rawName) && (
+            /\b(due|dtd|b\/e|mat|matures?|sr|nt|nts|notes?|bds?|bonds?|rev|go|gen oblig|ref|deb|debs)\b/.test(name) ||
+            /\d{1,2}\/\d{1,2}\/\d{2,4}|\b\d{6}\b/.test(rawName) || isCusip(ticker))) ||
+        /^(corporate|municipal|agency|individual) bonds?$/.test(type.trim()));
+  if (looksIndividualBond) {
+    const kind = /municipal|\bmuni\b|\brevs?\b|\bgo\b|gen oblig|authority|\bauth\b|school dist|county|\bcnty\b|\bcity of\b|\bcivic\b|\bimpt\b|\bdorm\b|\btpk\b|turnpike|\bwtr\b|\bswr\b|\bhosp\b|\bisd\b|\bpub\b/.test(combined) ? 'Municipal Bond'
+      : (_AGENCY_RE.test(combined) || /\bagency\b/.test(combined)) ? 'Agency Bond'
+      : /corporate|\bcorp\b|\binc\b|\bco\b|\bllc\b|\bplc\b/.test(combined) ? 'Corporate Bond'
       : 'Individual Bond';
-    return { score:10, type: bondType };
+    return { score: _individualBondScore(combined, rawName), type: kind };
   }
 
-  // ── STRUCTURED NOTES → score: 30 (flat, all types) ──
-  // Includes: buffer notes, autocalls, barrier notes, reverse convertibles,
-  // principal protected notes, any CUSIP-identified or bank-issued note
-  const isBank = STRUCTURED_ISSUERS.some(b => combined.includes(b));
-  const isNote = STRUCTURED_KEYWORDS.some(k => combined.includes(k)) || type.includes('note') || type.includes('structured');
+  // ── STRUCTURED NOTES → 30 (flat, all types) ──
+  if (sh.strong) return { score: 30, type: _noteTypeLabel(combined) };
 
-  if (!isAnnuity && (isCusip(ticker) || (isBank && isNote) || STRUCTURED_KEYWORDS.some(k => combined.includes(k)))) {
-    // Preserve the descriptive type label for display, but score is always 30
-    const noteType = combined.includes('buffer') || combined.includes('buffered') ? 'Buffer Note'
-      : combined.includes('autocall') || combined.includes('phoenix') ? 'Autocall Note'
-      : combined.includes('barrier') ? 'Barrier Note'
-      : combined.includes('reverse convertible') ? 'Reverse Convertible Note'
-      : combined.includes('principal protected') || combined.includes('capital protected') ? 'Principal Protected Note'
-      : combined.includes('leveraged') || combined.includes('enhanced participation') ? 'Participation Note'
-      : 'Structured Note';
-    return { score:30, type: noteType };
-  }
+  // Unknown CUSIP with no other clues — usually a structured note in advisory books.
+  // Scored 30 but flagged in Score Check so the advisor can confirm.
+  if (isCusip(ticker) && !fundLike) return { score: 30, type: _noteTypeLabel(combined), note: 'cusip-only' };
 
   return null;
+}
+
+// ── The single resolver every module uses ──
+function resolveHoldingScore(h) {
+  const t = (h.ticker || '').toUpperCase().trim();
+  const n = parseFloat(h.risk_score);
+  if (h._manualOverride && !isNaN(n)) return { score: Math.round(n), type: h.type, src: 'manual' };
+  if (t && TICKER_SCORES[t] !== undefined) return { score: TICKER_SCORES[t], type: h.type, src: 'table' };
+  const c = classifyHolding(h);
+  if (c) return { score: c.score, type: c.type, src: 'rule', note: c.note };
+  if (h._src === 'fallback') return { score: 50, type: h.type, src: 'fallback' };
+  if (t && _sessionScoreCache[t] !== undefined) return { score: _sessionScoreCache[t], type: h.type, src: 'ai' };
+  if (!isNaN(n) && n > 0) return { score: Math.round(n), type: h.type, src: 'ai' };
+  return { score: 50, type: h.type, src: 'fallback' };
+}
+
+function applyResolvedScore(h) {
+  const r = resolveHoldingScore(h);
+  h.risk_score = r.score;
+  h.risk_level = riskLevelLabel(r.score);
+  if (r.src === 'rule' && r.type) h.type = r.type;     // rules supply a precise label
+  else if (r.src === 'table' && (!h.type || /^(multiple|other|n\/?a|unknown|-+)$/i.test(h.type.trim()))) {
+    const c = classifyHolding(h);                        // e.g. "Multiple" → "Cash / Money Market"
+    if (c && c.type) h.type = c.type;
+  }
+  h._src = r.src;
+  if (r.note) h._srcNote = r.note; else delete h._srcNote;
+  return h;
+}
+
+const SCORE_SRC_LABELS = {
+  table: 'Verified ticker table', rule: 'Rule-based (asset type)', ai: 'AI estimate',
+  manual: 'Manual override', fallback: 'Default 50 — no score found'
+};
+
+// ── One asset-class bucket function used by every allocation view ──
+// (Previously each view guessed from the risk score — e.g. anything ≤ 6 was "Cash",
+//  so a mis-scored bond fund also showed up as cash, and "Healthcare" matched "alt".)
+function assetBucket(h) {
+  const t  = (h.type || '').toLowerCase();
+  const nm = (h.name || '').toLowerCase();
+  const s  = parseFloat(h.risk_score);
+  const sc = isNaN(s) ? 50 : s;
+  if (/debit/.test(t)) return 'Debit';
+  if (/annuit/.test(t)) return 'Annuities';
+  if (/structured|buffer note|autocall|barrier note|reverse convertible|participation note|principal protected/.test(t)) return 'Structured Notes';
+  const notCashFlow = !/cash flow|cashflow|cash cow/.test(t + ' ' + nm);
+  if (/\bcash\b|money market|sweep|\bcds?\b|certificate of deposit|treasury bill|floating rate fund/.test(t) && notCashFlow && sc <= 8) return 'Cash';
+  if (sc <= 6 && !/bond|fixed|treasury|municipal|muni|income|note/.test(t)) return 'Cash';
+  if (/bond|fixed income|treasury|municipal|\bmuni|securitized|mortgage|\btips\b|government|duration|aggregate|high yield|floating rate|\bclo\b|credit|preferred/.test(t)) return 'Fixed Income';
+  if (sc <= 40) return 'Fixed Income';
+  if (/\balt\b|alternative|commodit|real asset|gold|silver|precious|managed futures|market neutral|long[- ]short|multi[- ]strat|crypto|bitcoin|digital asset/.test(t)) return 'Alternatives';
+  return 'Equities';
+}
+
+// ══ SCORE CHECK — flags holdings whose score deserves a second look ══
+let _scoreCheckOpen = null;   // remembers whether the advisor opened/closed the panel
+function scoreCheckIssues(h) {
+  if (h._manualOverride) return [];                    // advisor already reviewed it
+  const issues = [];
+  const t = (h.type || '').toLowerCase(), nm = (h.name || '').toLowerCase(), txt = t + ' ' + nm;
+  const s = parseFloat(h.risk_score);
+  if (h._src === 'fallback') issues.push('No score could be found — defaulted to 50. Please verify.');
+  if (h._srcNote === 'cusip-only') issues.push('Identified only by its CUSIP — scored as a structured note (30). Confirm what it is.');
+  const cashish = (/money market|sweep|\bcash\b|\bcds?\b|certificate|annuit|\bbills?\b|floating rate fund|government (&|and) agency|govt (&|and) agency/.test(txt) && !/cash flow|cash cow/.test(txt)) ||
+                  /^[A-Z]{3}XX$/.test((h.ticker || '').toUpperCase());
+  if (s <= 6 && !cashish && t !== 'us treasury' &&
+      /bond|income|duration|fixed|treasury|govt|government|municipal|\bmuni|credit|mortgage|securitized|aggregate|\btips\b/.test(txt))
+    issues.push('Bond holding scored like cash (≤ 6). Bond funds usually score 12–40 depending on duration.');
+  if (s < 40 && /\b(stock|equity|growth|small cap|mid cap|large cap|emerging|technology|sector)\b/.test(txt) &&
+      !/annuit|structured|note|buffer|income|bond|hedged|defined outcome/.test(txt))
+    issues.push('Equity holding with an unusually low score.');
+  if (s >= 60 && /\b(bond|treasury|municipal|muni|fixed income|money market)\b/.test(t) &&
+      !/high yield|emerging|convertible|leveraged|inverse|2x|3x/.test(txt))
+    issues.push('Bond / cash holding with an unusually high score.');
+  return issues;
+}
+
+function buildScoreCheckHTML() {
+  if (!_portfolioAccounts || !_portfolioAccounts.length) return '';
+  const counts = { table: 0, rule: 0, ai: 0, manual: 0, fallback: 0 };
+  const flagged = [], aiRows = [];
+  _portfolioAccounts.forEach((acct, ai) => (acct.holdings || []).forEach((h, hi) => {
+    const src = h._manualOverride ? 'manual' : (h._src || 'ai');
+    counts[src] = (counts[src] || 0) + 1;
+    const issues = scoreCheckIssues(h);
+    if (issues.length) flagged.push({ h, ai, hi, msg: issues.join(' ') });
+    else if (src === 'ai') aiRows.push({ h, ai, hi, msg: 'AI estimate — this ticker is not in the verified table yet.' });
+  }));
+  const total = Object.values(counts).reduce((a, b) => a + b, 0);
+  if (!total) return '';
+  const chip = (n, label, bg, col) => n ? `<span style="font-size:.66rem;font-weight:700;padding:3px 10px;border-radius:20px;background:${bg};color:${col};white-space:nowrap">${label} ${n}</span>` : '';
+  const row = (r, warn) => `
+    <div style="display:grid;grid-template-columns:64px 1fr 44px 58px;gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid #eef1f5">
+      <span class="ticker-badge" style="justify-self:start">${r.h.ticker || '—'}</span>
+      <div><div style="font-size:.76rem;font-weight:700;color:var(--navy)">${r.h.name || '—'}</div>
+           <div style="font-size:.68rem;color:${warn ? '#b45309' : '#6b7e96'};margin-top:2px">${warn ? '⚠️ ' : ''}${r.msg}</div></div>
+      <div style="font-family:'Playfair Display',serif;font-weight:700;font-size:1rem;color:${riskColor(parseFloat(r.h.risk_score) || 50)};text-align:center">${Math.round(parseFloat(r.h.risk_score) || 50)}</div>
+      <button class="row-act-btn" style="width:auto;padding:4px 10px" onclick="openRiskEdit(${r.ai},${r.hi},event)">Edit</button>
+    </div>`;
+  const openAttr = (_scoreCheckOpen === null ? flagged.length > 0 : _scoreCheckOpen) ? ' open' : '';
+  return `
+    <details class="section-card" style="margin-bottom:16px;padding:14px 18px" ontoggle="_scoreCheckOpen=this.open"${openAttr}>
+      <summary style="cursor:pointer;display:flex;align-items:center;gap:10px;flex-wrap:wrap;list-style:none">
+        <span style="font-size:.7rem;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--navy)">🔎 Score Check</span>
+        ${flagged.length ? chip(flagged.length, '⚠ To review', '#fff3e0', '#b45309') : chip(1, '✓ Nothing flagged', '#e6f4ed', '#1d7a50').replace(' 1<', '<')}
+        ${chip(counts.table, 'Verified', '#e8f0fa', '#2563a8')}
+        ${chip(counts.rule, 'Rule-based', '#f0f2f5', '#4a5b70')}
+        ${chip(counts.ai, 'AI estimate', '#f5eed8', '#8a6d1f')}
+        ${chip(counts.manual, 'Manual', '#f3eeff', '#7c3aed')}
+        ${chip(counts.fallback, 'Defaulted', '#fde8e8', '#c0392b')}
+        <span style="flex:1"></span><span style="font-size:.62rem;color:var(--slate-lt)">click to show / hide details</span>
+      </summary>
+      <div style="margin-top:12px;font-size:.7rem;color:var(--slate);line-height:1.6">
+        Every score comes from one of five sources: the <strong>verified ticker table</strong>, a <strong>rule</strong> for the asset type
+        (cash, annuities, CDs, individual bonds, structured notes, Treasury funds by duration), an <strong>AI estimate</strong>,
+        a <strong>manual</strong> edit, or a <strong>default</strong> when nothing was found. Holdings that look out of line are listed first.
+      </div>
+      ${flagged.length ? `<div style="margin-top:10px">${flagged.map(r => row(r, true)).join('')}</div>` : ''}
+      ${aiRows.length ? `<div style="margin-top:12px;font-size:.6rem;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:#8a6d1f">AI estimates (${aiRows.length})</div>${aiRows.map(r => row(r, false)).join('')}` : ''}
+      ${!flagged.length && !aiRows.length ? '<div style="margin-top:10px;font-size:.74rem;color:#1d7a50;font-weight:600">✓ Every holding was scored from the verified table, a firm rule, or a manual edit.</div>' : ''}
+    </details>`;
 }
 
 
@@ -6344,6 +6690,14 @@ const mammoth = {
           <span class="pb-skip-text">
             <span class="pb-skip-title">Start from scratch — no current portfolio</span>
             <span class="pb-skip-hint">For new clients or fresh allocations. The proposal will show only the proposed portfolio side.</span>
+          </span>
+        </button>
+
+        <button class="pb-skip-btn" id="pb-from-analyzer-btn" type="button" onclick="pbUseAnalyzerPortfolio()" style="display:none;margin-top:10px">
+          <span class="pb-skip-icon">📊</span>
+          <span class="pb-skip-text">
+            <span class="pb-skip-title" id="pb-from-analyzer-title">Use the portfolio already in the Analyzer</span>
+            <span class="pb-skip-hint">Carries over every holding, score edit and cash/debit balance — same risk score, no re-upload.</span>
           </span>
         </button>
       </div>
@@ -7153,7 +7507,7 @@ Return ONLY a JSON array (no markdown), one object per holding in order:
     const resp = await fetch('/api/proxy', {
       method:'POST', headers: getApiHeaders(),
       body: JSON.stringify({
-        model:'claude-sonnet-4-6', max_tokens:2000,
+        model: AI_MODEL, max_tokens:2000,
         messages:[{role:'user',content:prompt}]
       })
     });
@@ -7208,7 +7562,7 @@ async function mdlProcessFile(file) {
       const b64 = await new Promise(res => { reader.onload = e => res(e.target.result.split(',')[1]); reader.readAsDataURL(file); });
       const resp = await fetch('/api/proxy', {
         method:'POST', headers: getApiHeaders(),
-        body: JSON.stringify({ model:'claude-sonnet-4-6', max_tokens:3000,
+        body: JSON.stringify({ model: AI_MODEL, max_tokens:3000,
           messages:[{role:'user',content:[
             {type:'document',source:{type:'base64',media_type:'application/pdf',data:b64}},
             {type:'text',text:'Extract all holdings. Return JSON array: [{"ticker":"","name":"","weight":0},...]. Only JSON, no markdown.'}
@@ -7546,7 +7900,7 @@ Calculate the weighted average YTD and 1-year return for this specific sleeve, t
 
     // Two-turn conversation: let AI calculate freely, then extract JSON
     const firstResp = await fetchWithRetry({
-      model: 'claude-sonnet-4-6',
+      model: AI_MODEL,
       max_tokens: 1000,
       messages: [{ role: 'user', content: prompt }]
     });
@@ -7565,7 +7919,7 @@ Calculate the weighted average YTD and 1-year return for this specific sleeve, t
     // If no JSON found, send a follow-up asking just for the JSON
     if (!perf || perf.ytd == null) {
       const secondResp = await fetchWithRetry({
-        model: 'claude-sonnet-4-6',
+        model: AI_MODEL,
         max_tokens: 200,
         messages: [
           { role: 'user', content: prompt },
@@ -7646,7 +8000,7 @@ Return ONLY JSON (no markdown):
     const resp = await fetch('/api/proxy', {
       method:'POST', headers: getApiHeaders(),
       body: JSON.stringify({
-        model:'claude-sonnet-4-6', max_tokens:600,
+        model: AI_MODEL, max_tokens:600,
         messages:[{role:'user',content:prompt}]
       })
     });
@@ -7718,7 +8072,7 @@ Only include holdings where you can genuinely suggest a better alternative. Skip
     const resp = await fetch('/api/proxy', {
       method:'POST', headers: getApiHeaders(),
       body: JSON.stringify({
-        model:'claude-sonnet-4-6', max_tokens:3000,
+        model: AI_MODEL, max_tokens:3000,
         messages:[{role:'user',content:prompt}]
       })
     });
@@ -7810,7 +8164,7 @@ Keep it concise and advisor-focused. Use specific numbers. Write in plain prose,
     const resp = await fetch('/api/proxy', {
       method:'POST', headers: getApiHeaders(),
       body: JSON.stringify({
-        model:'claude-sonnet-4-6', max_tokens:600,
+        model: AI_MODEL, max_tokens:600,
         messages:[{role:'user',content:prompt}]
       })
     });
@@ -9211,6 +9565,26 @@ async function pbHandleUpload(file) {
 
 // ── AI parse of current portfolio (uses the same engine as the analyzer) ──
 async function pbParseCurrent(file, fileData, ext) {
+  // CSV / Excel: use the exact same local parser + scoring as the Portfolio Analyzer,
+  // so the same file always produces the same score in both tools.
+  if (ext === 'csv' || ext === 'xlsx' || ext === 'xls') {
+    let csvText = fileData;
+    if (ext !== 'csv') {
+      const wb = XLSX.read(fileData, { type:'array' });
+      csvText = XLSX.utils.sheet_to_csv(wb.Sheets[wb.SheetNames[0]]);
+    }
+    if (!csvText || !csvText.trim()) throw new Error('File appears empty.');
+    const parsedLocal = parseCSVLocally(csvText);
+    if (!parsedLocal || !parsedLocal.accounts.flatMap(a => a.holdings).length) throw new Error('No holdings found in file.');
+    const need = parsedLocal.accounts.flatMap(a => a.holdings).filter(h => h._needsScore);
+    if (need.length) {
+      document.getElementById('pb-upload-status').textContent = `Scoring ${need.length} unknown holding${need.length === 1 ? '' : 's'}…`;
+      await scoreUnknownTickersBatch(need);
+    }
+    _pbFinalizeCurrent(parsedLocal.portfolio_name, parsedLocal.accounts);
+    return;
+  }
+
   let fileContent = [];
   if (file.type.startsWith('image/') || (!['pdf','csv','xlsx','xls','docx','doc'].includes(ext))) {
     const b64 = fileData.split(',')[1];
@@ -9254,7 +9628,8 @@ ${knownScoresJSON}
 
 For any ticker NOT in the list above, use your knowledge to assign a score. Calibration:
 SPY=74, QQQ=85, AGG=28, TLT=35, HYG=48, GLD=65, EEM=82, IBIT=95
-Money market/cash=5, Variable annuity=50, Other annuities=5, Structured note=30, Bond=20, CD=5
+Money market/cash=5, Variable annuity=50, Other annuities=5, Structured note=30, CD=5
+Bond FUNDS by duration: T-bill 5, short 13-15, intermediate 26-28, long Treasury 35-42 (never 5 unless a T-bill/money market fund). Individual bonds 10-24 by maturity. Individual stocks never below 78.
 
 CRITICAL — Return ONLY valid JSON, no markdown, no explanation:
 {"portfolio_name":"string","accounts":[{"account_name":"string","holdings":[{"ticker":"string","name":"string","type":"string","market_value":number,"allocation_pct":number,"risk_score":number}]}]}
@@ -9269,7 +9644,7 @@ Rules:
     method: 'POST',
     headers: getApiHeaders(),
     body: JSON.stringify({
-      model: 'claude-sonnet-4-6',
+      model: AI_MODEL,
       max_tokens: 8000,
       messages: [{ role:'user', content: [...fileContent, { type:'text', text:prompt }] }]
     })
@@ -9283,16 +9658,18 @@ Rules:
   if (!m) throw new Error('Could not parse AI response.');
   const parsed = JSON.parse(m[0]);
 
-  // Apply classifyHolding overrides (annuity/note/bond detection) the same way the analyzer does
-  const accounts = (parsed.accounts || []).map(acct => ({
+  _pbFinalizeCurrent(parsed.portfolio_name, parsed.accounts || []);
+}
+
+// Score every holding with the shared engine and store the current portfolio
+function _pbFinalizeCurrent(portfolioName, rawAccounts) {
+  const accounts = (rawAccounts || []).map(acct => ({
     ...acct,
     holdings: (acct.holdings || []).map(h => {
-      const classified = classifyHolding(h);
-      const mv = parseFloat(h.market_value) || 0;
-      if (classified) return { ...h, market_value: mv, risk_score: classified.score, type: classified.type };
-      const t = (h.ticker || '').toUpperCase().trim();
-      const local = TICKER_SCORES[t] || _sessionScoreCache[t];
-      return { ...h, market_value: mv, risk_score: local !== undefined ? local : (h.risk_score || 50) };
+      const x = { ...h, market_value: parseFloat(h.market_value) || 0 };
+      applyResolvedScore(x);
+      applyHoldingOverride(x);
+      return x;
     })
   }));
 
@@ -9308,7 +9685,7 @@ Rules:
   const overallRisk = totalValue > 0 ? Math.round(weightedScore / totalValue) : 50;
 
   _pbState.current = {
-    portfolio_name: parsed.portfolio_name || 'Client Portfolio',
+    portfolio_name: portfolioName || 'Client Portfolio',
     total_value: totalValue,
     risk_score: overallRisk,
     accounts: accounts,
@@ -9322,15 +9699,13 @@ function pbComputeAssetAlloc(accounts) {
   accounts.forEach(a => {
     (a.holdings || []).forEach(h => {
       const mv = parseFloat(h.market_value) || 0;
-      const t = (h.type || '').toLowerCase();
-      const s = parseFloat(h.risk_score) || 50;
-      if (t.includes('annuity')) ann += mv;
-      else if (t.includes('structured note') || t.includes('buffer note') || t.includes('autocall') ||
-               t.includes('barrier note') || t.includes('reverse convertible') ||
-               t.includes('participation note') || t.includes('principal protected')) sn += mv;
-      else if (s <= 6 || t.includes('money market') || (t.includes('cash') && !t.includes('cash flow'))) cash += mv;
-      else if (s <= 40 || t.includes('bond') || t.includes('fixed') || t.includes('municipal') || t.includes('securitized')) fi += mv;
-      else if (t.includes('alt') || t.includes('commodity') || t.includes('real asset')) alt += mv;
+      if (mv <= 0) return;
+      const b = assetBucket(h);
+      if (b === 'Annuities') ann += mv;
+      else if (b === 'Structured Notes') sn += mv;
+      else if (b === 'Cash') cash += mv;
+      else if (b === 'Fixed Income') fi += mv;
+      else if (b === 'Alternatives') alt += mv;
       else eq += mv;
     });
   });
@@ -9507,7 +9882,7 @@ function pbUpdateModelPreview(resetSleeve) {
   const sleeve = (model.sleeves || [])[sleeveIdx];
   if (!sleeve) return;
 
-  const risk = pbComputeSleeveRisk(sleeve.holdings);
+  const risk = pbComputeSleeveRisk(sleeve.holdings.map(h => applyResolvedScore({ ...h })));
   const col = riskColor(risk);
   const holdingsHtml = sleeve.holdings.map(h =>
     `<div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid var(--border)">
@@ -9551,12 +9926,8 @@ function pbConfirmModelSleeve() {
   const sleeve = (model.sleeves || [])[sleeveIdx];
   if (!sleeve) { alert('Selected model has no holdings.'); return; }
 
-  // Apply classifyHolding overrides to the model's holdings (in case some need reclassification)
-  const holdings = sleeve.holdings.map(h => {
-    const classified = classifyHolding(h);
-    if (classified) return { ...h, risk_score: classified.score, type: classified.type };
-    return { ...h };
-  });
+  // Score the model's holdings with the shared engine (verified table first)
+  const holdings = sleeve.holdings.map(h => applyResolvedScore({ ...h }));
   const risk = pbComputeSleeveRisk(holdings);
 
   _pbState.sleeves.push(pbBuildSleeve({
@@ -9622,19 +9993,17 @@ function pbConfirmCustomSleeve() {
     if (!ticker && !hname) return; // skip blank rows
     if (isNaN(w) || w <= 0) return; // require a weight
 
-    // Auto-classify if no risk provided
-    const fake = { ticker, name: hname, type: '' };
-    const classified = classifyHolding(fake);
-    if (isNaN(r)) {
-      if (classified) r = classified.score;
-      else r = TICKER_SCORES[ticker] || _sessionScoreCache[ticker] || 50;
-    }
+    // Auto-score with the shared engine if no risk was typed in
+    const rs = resolveHoldingScore({ ticker, name: hname, type: '' });
+    const typed = !isNaN(r);
+    if (!typed) r = rs.score;
     holdings.push({
       ticker,
       name: hname || ticker,
-      type: classified ? classified.type : 'Custom',
+      type: rs.src === 'rule' ? rs.type : 'Custom',
       weight: w,
-      risk_score: r
+      risk_score: r,
+      _src: typed ? 'manual' : rs.src
     });
   });
 
@@ -9681,16 +10050,9 @@ function pbComputeProposed() {
     sl.holdings.forEach(h => {
       const w = (parseFloat(h.weight) || 0) / innerSum;
       const overallShare = sleeveShare * w * 100;
-      const t = (h.type || '').toLowerCase();
-      const s = parseFloat(h.risk_score) || 50;
-      if (t.includes('annuity')) buckets['Annuities'] += overallShare;
-      else if (t.includes('structured note') || t.includes('buffer note') || t.includes('autocall') ||
-               t.includes('barrier') || t.includes('reverse convertible') ||
-               t.includes('participation note') || t.includes('principal protected')) buckets['Structured Notes'] += overallShare;
-      else if (s <= 6 || t.includes('money market') || (t.includes('cash') && !t.includes('cash flow'))) buckets['Cash'] += overallShare;
-      else if (s <= 40 || t.includes('bond') || t.includes('fixed') || t.includes('municipal') || t.includes('securitized')) buckets['Fixed Income'] += overallShare;
-      else if (t.includes('alt') || t.includes('commodity') || t.includes('real asset')) buckets['Alternatives'] += overallShare;
-      else buckets['Equities'] += overallShare;
+      const b = assetBucket(h);
+      const key = (b === 'Debit') ? 'Equities' : b;
+      buckets[key] = (buckets[key] || 0) + overallShare;
     });
   });
 
@@ -9864,6 +10226,57 @@ function pbRestoreAfterExport() {
   // No restore needed — saveAsImage captures innerHTML synchronously, and the
   // attribute-sync above does not break the live UI (DOM .value still drives display).
 }
+
+// ── Bring the Analyzer's portfolio straight into the proposal ──
+function pbRefreshAnalyzerButton() {
+  const btn = document.getElementById('pb-from-analyzer-btn');
+  if (!btn) return;
+  const has = Array.isArray(_portfolioAccounts) && _portfolioAccounts.length > 0;
+  btn.style.display = has ? '' : 'none';
+  if (has) {
+    const t = document.getElementById('az-portfolio-title');
+    const nm = t ? t.textContent.replace('✎', '').trim() : '';
+    const sc = document.getElementById('az-score');
+    const el = document.getElementById('pb-from-analyzer-title');
+    if (el) el.textContent = 'Use ' + (nm || 'the Analyzer portfolio') + (sc && sc.textContent ? ' (risk ' + sc.textContent.trim() + ')' : '');
+  }
+}
+function pbUseAnalyzerPortfolio() {
+  if (!_portfolioAccounts || !_portfolioAccounts.length) { alert('Run the Portfolio Analyzer first.'); return; }
+  const accounts = _portfolioAccounts.map(a => {
+    const hs = (a.holdings || []).map(h => ({ ...h }));
+    if ((a.cash_added || 0) > 0) hs.push({ ticker:'CASH', name:'Cash', type:'Cash / Money Market', market_value:a.cash_added, risk_score:5, _src:'rule' });
+    return { account_name: a.account_name, holdings: hs, cash_added: a.cash_added || 0 };
+  });
+  const totalValue = _portfolioAccounts.reduce((s, a) =>
+    s + (a.holdings || []).reduce((x, h) => x + (parseFloat(h.market_value) || 0), 0) + (a.cash_added || 0), 0);
+  const scoreEl = document.getElementById('az-score');
+  const titleEl = document.getElementById('az-portfolio-title');
+  _pbState.noCurrent = false;
+  _pbState.current = {
+    portfolio_name: titleEl ? titleEl.textContent.replace('✎', '').trim() : 'Client Portfolio',
+    total_value: totalValue,
+    risk_score: parseInt(scoreEl && scoreEl.textContent, 10) || 50,   // identical to the Analyzer banner
+    accounts,
+    asset_alloc: pbComputeAssetAlloc(accounts)
+  };
+  document.getElementById('pb-skip-btn').classList.remove('active');
+  document.getElementById('pb-upload-status').classList.remove('err');
+  document.getElementById('pb-upload-status').textContent = '✓ Loaded from the Portfolio Analyzer';
+  document.getElementById('pb-step1-num').classList.add('done');
+  pbRenderCurrentSummary();
+  document.getElementById('pb-step2').style.display = 'block';
+  document.getElementById('pb-step3').style.display = 'block';
+  pbRenderSleeves();
+  pbRenderComparison();
+}
+(function () {
+  const _prevShowView = window.showView;
+  window.showView = function (name) {
+    _prevShowView(name);
+    if (name === 'proposal') pbRefreshAnalyzerButton();
+  };
+})();
 
 // Keep notes in sync as the user types (for export)
 document.addEventListener('input', e => {
